@@ -611,7 +611,7 @@ if go:
 col_dial, col_right = st.columns([3, 2], gap="small")
 
 with col_dial:
-    n1_cap = af.get("n1_max_pct", 102.0)
+    n1_cap = AIRFRAMES.get(series, {}).get("n1_max_pct", 102.0)
     if (brand or "").lower() == "boeing":
         fig = draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=n1_cap)
     else:
