@@ -519,16 +519,19 @@ def draw_n1_dial_boeing(n1_percent: float, max_n1_pct: float = 102.0):
     x2m, y2m = (R_ring - tick_len_major - 0.02)*np.cos(ang_max), (R_ring - tick_len_major - 0.02)*np.sin(ang_max)
     ax.plot([x1m, x2m], [y1m, y2m], color=red_tick, linewidth=3, zorder=4)
 
-    # Yellow chevron '>' (outline only), small, pointing inward
+       # --- Yellow chevron '>' (outline only), sharper, pointing inward ---
     ang_n1  = scale_to_angle(min(max(n1_sc, 0.0), max_sc))
-    tip_r   = R_ring - 0.006                 # tip just inside the ring
-    base_r  = R_ring + 0.02                  # small offset outside (¼ previous size)
-    spread  = math.radians(2.0)              # narrow
+    tip_r   = R_ring - 0.008                 # tip just inside the ring
+    base_r  = R_ring + 0.045                 # pull base further out for sharper angle
+    spread  = math.radians(3.0)              # narrower = sharper
     tip     = np.array([tip_r*np.cos(ang_n1),  tip_r*np.sin(ang_n1)])
     left    = np.array([base_r*np.cos(ang_n1 + spread), base_r*np.sin(ang_n1 + spread)])
     right   = np.array([base_r*np.cos(ang_n1 - spread), base_r*np.sin(ang_n1 - spread)])
-    ax.plot([left[0],  tip[0]],  [left[1],  tip[1]],  color=chevron, linewidth=2.0, solid_capstyle='round', zorder=6)
-    ax.plot([right[0], tip[0]],  [right[1], tip[1]], color=chevron, linewidth=2.0, solid_capstyle='round', zorder=6)
+    # draw two lines (outline chevron)
+    ax.plot([left[0],  tip[0]],  [left[1],  tip[1]],
+            color=chevron, linewidth=2.4, solid_capstyle='round', zorder=6)
+    ax.plot([right[0], tip[0]], [right[1], tip[1]],
+            color=chevron, linewidth=2.4, solid_capstyle='round', zorder=6)
 
     # Square digital box at 0 mark, lifted so it clears the ring
     ang0 = scale_to_angle(0.0)
