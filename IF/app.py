@@ -1,11 +1,11 @@
 # app.py
 # Infinite Flight – Takeoff N1% & Trim Estimator (Sim-use only)
-# - N1 readout printed under dial (no overlap)
-# - Stronger N1 model with weight/PA/flaps floor
-# - Stronger IF Trim model
-# - Airbus flaps=1 forces "1+F"
-# - Flaps detent guide shows "Flap setting: X"
-# - Performance card without mini-graph
+# - Uses unified calibrations.json (engines + airframes + optional overrides)
+# - N1 readout printed UNDER the dial (big, black text)
+# - QNH parser accepts inHg OR hPa
+# - Stronger N1 model with weight/PA/flaps floor + optional override blending
+# - Stronger IF Trim model + optional override blending
+# - Airbus FLAPS=1 forces "1+F"; Flaps detent guide shows "Flap setting: X"
 
 import re
 import json
@@ -24,38 +24,31 @@ import seaborn as sns
 sns.set_theme(style="whitegrid", context="talk")
 
 # --------------------------
-# Engine calibration (heuristic; sim-use only)
+# Unified calibration loader
 # --------------------------
-CAL_PATH = Path(__file__).with_name("engine_calibrations.json")
+CALIB_PATH = Path(__file__).with_name("calibrations.json")
 
-def load_calibrations() -> Dict[str, Any]:
-    if CAL_PATH.exists():
-        with open(CAL_PATH, "r", encoding="utf-8") as f:
+def load_calibrations_unified() -> Dict[str, Any]:
+    if CALIB_PATH.exists():
+        with open(CALIB_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    # Hot-fixed stronger fallbacks
+    # Minimal fallback if file missing
     return {
-        "leap-1b28": { "a": 95.5, "b_temp": -0.06, "c_pa": 0.28, "d_derate": -1.6, "w_ref": 160.0, "e_wt": 0.020 },
-        "ge90-94b":  { "a": 96.8, "b_temp": -0.06, "c_pa": 0.26, "d_derate": -1.6, "w_ref": 460.0, "e_wt": 0.022 },
-        "trent-970-84": { "a": 97.5, "b_temp": -0.07, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 800.0, "e_wt": 0.014 },
-        "trent-xwb-84": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 590.0, "e_wt": 0.016 },
-        "cfm56-5b3": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 158.0, "e_wt": 0.022 },
-        "cfm56-5b4": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 148.0, "e_wt": 0.022 },
-        "pw2037":    { "a": 95.5, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.6, "w_ref": 235.0, "e_wt": 0.022 },
-        "generic":   { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
+        "engines": {
+            "generic": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
+        },
+        "airframes": {
+            "generic": { "engine_id": "generic", "brand": "boeing",
+                         "detents": ["0","5","15","25","30"],
+                         "baseline_trim": 8.0, "baseline_flaps": 5, "cg_ref": 25.0 }
+        }
     }
 
-CAL = load_calibrations()
+CALIB = load_calibrations_unified()
+ENGINES: Dict[str, Any] = CALIB.get("engines", {})
+AIRFRAMES: Dict[str, Any] = CALIB.get("airframes", {})
 
-ENGINE_ALIASES = {
-    "LEAP-1B28": "leap-1b28",
-    "GE90-94B": "ge90-94b",
-    "TRENT 970-84": "trent-970-84",
-    "TRENT XWB-84": "trent-xwb-84",
-    "CFM56-5B3": "cfm56-5b3",
-    "CFM56-5B4": "cfm56-5b4",
-    "PW2037": "pw2037"
-}
-
+# Pretty names for engines (optional)
 ENGINE_PRETTY = {
     "leap-1b28": "LEAP-1B",
     "ge90-94b": "GE90-94B",
@@ -67,15 +60,26 @@ ENGINE_PRETTY = {
     "generic": "Generic"
 }
 
+ENGINE_ALIASES = {
+    "LEAP-1B28": "leap-1b28",
+    "GE90-94B": "ge90-94b",
+    "TRENT 970-84": "trent-970-84",
+    "TRENT XWB-84": "trent-xwb-84",
+    "CFM56-5B3": "cfm56-5b3",
+    "CFM56-5B4": "cfm56-5b4",
+    "PW2037": "pw2037"
+}
+
 # --------------------------
-# Brand detection (Airbus vs Boeing)
+# Brand & series detection
 # --------------------------
 AIRBUS_TOKENS  = [
     r"\bA3(18|19|20|21)\b", r"\bA(330|340|350|380)\b",
     r"\bA320-?200\b", r"\bA321-?200\b", r"\bA350-900\b", r"\bA380-800\b"
 ]
 BOEING_TOKENS  = [
-    r"\bB(737|747|757|767|777|787)\b", r"\b737\s*MAX\b", r"\bMAX\s*8\b", r"\b777-200\b", r"\b757-200\b"
+    r"\bB(737|747|757|767|777|787)\b", r"\b737\s*MAX\b", r"\bMAX\s*8\b",
+    r"\b777-200\b", r"\b757-200\b"
 ]
 
 def detect_brand(text: str) -> str:
@@ -86,93 +90,83 @@ def detect_brand(text: str) -> str:
     for pat in BOEING_TOKENS:
         if re.search(pat, t, flags=re.I):
             return "boeing"
+    # engine hints
     if "TRENT XWB" in t or "CFM56-5B" in t:
         return "airbus"
     return "boeing"
 
-# --------------------------
-# Flaps detents (for guide)
-# --------------------------
-AIRBUS_DETENTS = ["0", "1", "1+F", "2", "3", "FULL"]
-BOEING_DETENTS_DEFAULT = ["0", "1", "2", "5", "10", "15", "25", "30", "40"]
-BOEING_FAMILY_DETENTS = {
-    "737": ["0", "1", "2", "5", "10", "15", "25", "30", "40"],
-    "757": ["0", "1", "5", "15", "20", "25", "30"],
-    "767": ["0", "5", "15", "20", "25", "30"],
-    "777": ["0", "5", "15", "20", "25", "30"],
-    "787": ["0", "5", "10", "15", "17", "18", "20", "25", "30"],  # tunable
-}
-
-def get_boeing_series(header_or_text: str) -> Optional[str]:
+def parse_airframe_series(header_or_text: str) -> str:
     t = (header_or_text or "").upper()
-    for key in BOEING_FAMILY_DETENTS.keys():
-        if re.search(rf"\b{key}\b", t):
-            return key
-    if re.search(r"\bMAX\s*8\b", t) or re.search(r"\b737\s*MAX\b", t):
-        return "737"
-    return None
-
-def get_flap_detents(brand: str, header_or_text: str) -> list[str]:
-    if brand == "airbus":
-        return AIRBUS_DETENTS
-    series = get_boeing_series(header_or_text) or ""
-    return BOEING_FAMILY_DETENTS.get(series, BOEING_DETENTS_DEFAULT)
+    # See if a JSON airframe key matches a known type in the text
+    if "A321" in t: return "airbus_a321"
+    if "A320" in t: return "airbus_a320"
+    if "A350" in t: return "airbus_a350"
+    if "A380" in t: return "airbus_a380"
+    if re.search(r"\b737\b", t) or "MAX" in t: return "boeing_737_max8" if "MAX" in t else "boeing_737"
+    if "757" in t: return "boeing_757"
+    if "777" in t: return "boeing_777"
+    if "787" in t: return "boeing_787"
+    return "generic"
 
 # --------------------------
-# Parsing & helpers
+# Flaps detents (from JSON or sensible defaults)
 # --------------------------
+AIRBUS_DEFAULT_DETENTS = ["0", "1", "1+F", "2", "3", "FULL"]
+BOEING_DEFAULT_DETENTS = ["0", "1", "2", "5", "10", "15", "25", "30", "40"]
+
+def get_airframe(series: str) -> Dict[str, Any]:
+    return AIRFRAMES.get(series, AIRFRAMES.get("generic", {}))
+
+def get_flap_detents(brand: str, series: str) -> list[str]:
+    af = get_airframe(series)
+    det = af.get("detents")
+    if det: return det
+    return AIRBUS_DEFAULT_DETENTS if brand == "airbus" else BOEING_DEFAULT_DETENTS
+
+# --------------------------
+# Parsing helpers
+# --------------------------
+def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
+    for token, eng_id in ENGINE_ALIASES.items():
+        if re.search(rf"\b{re.escape(token)}\b", txt, flags=re.I):
+            return eng_id, token
+    # fallback from airframe default
+    series = parse_airframe_series(txt)
+    eng_from_af = get_airframe(series).get("engine_id", "generic")
+    return eng_from_af, None
+
+def pressure_altitude_ft(field_elev_ft: float, qnh_inhg: float) -> float:
+    # PA = Elev + (29.92 - QNH) * 1000
+    return float(field_elev_ft) + (29.92 - float(qnh_inhg)) * 1000.0
+
 def _parse_qnh_inhg(txt: str) -> Optional[float]:
     """
-    Accept QNH in either inHg (e.g., 29.92 or 30.01) or hPa (e.g., 1013, 1021, 1005 HPA)
-    and return inHg as a float.
+    Accept QNH in inHg (e.g. 29.92) or hPa (e.g. 1021 / 1021 hPa) and return inHg.
     """
-    # Try explicit inHg patterns first: "QNH 29.92", "QNH: 30.01"
+    # inHg like "QNH 29.92"
     m = re.search(r"\bQNH[:\s]+(\d{2}\.\d{2})\b", txt, flags=re.I)
     if m:
-        try:
-            return float(m.group(1))
-        except:
-            pass
-
-    # Try hPa patterns: "QNH 1013", "QNH 1021 HPA", "QNH: 1005hPa"
-    m = re.search(r"\bQNH[:\s]+(\d{3,4})\s*(HPA)?\b", txt, flags=re.I)
+        try: return float(m.group(1))
+        except: pass
+    # hPa integer like "QNH 1021", optional HPA token
+    m = re.search(r"\bQNH[:\s]+(\d{3,4})(?:\s*HPA)?\b", txt, flags=re.I)
     if m:
         try:
             hpa = float(m.group(1))
-            if 850.0 <= hpa <= 1100.0:         # sanity range for sea-level QNH
-                return hpa * 0.0295299830714    # hPa → inHg
-        except:
-            pass
-
-    # Also accept "QNH 1013.2" (rare)
+            if 850.0 <= hpa <= 1100.0:
+                return hpa * 0.0295299830714
+        except: pass
+    # hPa decimal like "QNH 1013.2"
     m = re.search(r"\bQNH[:\s]+(\d{3,4}\.\d)\s*(HPA)?\b", txt, flags=re.I)
     if m:
         try:
             hpa = float(m.group(1))
             if 850.0 <= hpa <= 1100.0:
                 return hpa * 0.0295299830714
-        except:
-            pass
-
+        except: pass
     return None
 
-
-
-def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
-    for token, eng_id in ENGINE_ALIASES.items():
-        if re.search(rf"\b{re.escape(token)}\b", txt, flags=re.I):
-            return eng_id, token
-    return "generic", None
-
-def pressure_altitude_ft(field_elev_ft: float, qnh_inhg: float) -> float:
-    # Approx: PA = Elev + (29.92 - QNH) * 1000
-    return float(field_elev_ft) + (29.92 - float(qnh_inhg)) * 1000.0
-
 def parse_cg_percent(txt: str) -> Optional[float]:
-    """
-    Try to extract a %MAC CG from SimBrief/OFP text. Looks for TOCG, ZFWCG, MACZFW, etc.
-    Returns a float (e.g., 24.3) or None.
-    """
     patterns = [
         r"\bTOCG\s+(\d{1,2}\.?\d*)\s*%",
         r"\bZFWCG\s+(\d{1,2}\.?\d*)\s*%",
@@ -191,20 +185,6 @@ def parse_cg_percent(txt: str) -> Optional[float]:
                 pass
     return None
 
-def parse_airframe_series(header_or_text: str) -> str:
-    t = (header_or_text or "").upper()
-    # Airbus
-    if re.search(r"\bA321\b", t): return "airbus_a321"
-    if re.search(r"\bA320\b", t): return "airbus_a320"
-    if re.search(r"\bA350\b", t): return "airbus_a350"
-    if re.search(r"\bA380\b", t): return "airbus_a380"
-    # Boeing
-    if re.search(r"\b737\b", t):  return "boeing_737"
-    if re.search(r"\b757\b", t):  return "boeing_757"
-    if re.search(r"\b777\b", t):  return "boeing_777"
-    if re.search(r"\b787\b", t):  return "boeing_787"
-    return "generic"
-
 def parse_takeoff_text(txt: str) -> Dict[str, Any]:
     d: Dict[str, Any] = {}
     header_line = next((l for l in txt.splitlines() if re.search(r"\b[A-Z0-9]{3,}.*", l)), "")
@@ -218,20 +198,15 @@ def parse_takeoff_text(txt: str) -> Dict[str, Any]:
     rwy = re.search(r"RWY\s+(\d+[LRC]?)/\+?0?", txt)
     d["runway"] = rwy.group(1) if rwy else None
 
-    # Weather
+    # Weather (OAT, QNH (any unit), ELEV)
     m = re.search(r"OAT\s+(-?\d+)", txt);        d["oat_c"] = float(m.group(1)) if m else None
-
-    # QNH: accept inHg OR hPa and store as inHg
     d["qnh_inhg"] = _parse_qnh_inhg(txt)
-
     m = re.search(r"ELEV\s+(-?\d+)", txt);       d["elev_ft"] = float(m.group(1)) if m else None
-
 
     # Inputs/outputs
     m = re.search(r"WEIGHT\s+(\d+\.?\d*)", txt); d["tow_klb"] = float(m.group(1)) if m else None
     m = re.search(r"FLAPS\s+(\d+)", txt);        d["flaps"] = int(m.group(1)) if m else None
-    m = re.search(r"THRUST\s+(FLEX|D-TO2|D-TO1|D-TO)", txt)
-    d["thrust_mode"] = m.group(1) if m else None
+    m = re.search(r"THRUST\s+(FLEX|D-TO2|D-TO1|D-TO)", txt); d["thrust_mode"] = m.group(1) if m else None
     m = re.search(r"SEL\s+TEMP\s+(\d+)", txt);   d["sel_temp_c"] = float(m.group(1)) if m else None
     m = re.search(r"BLEEDS\s+(ON|OFF)", txt);    d["bleeds_on"] = (m.group(1) == "ON") if m else True
     m = re.search(r"A/ICE\s+(ON|OFF)", txt);     d["anti_ice_on"] = (m.group(1) == "ON") if m else False
@@ -242,26 +217,20 @@ def parse_takeoff_text(txt: str) -> Dict[str, Any]:
     vr = re.search(r"VR\s+(\d+)", txt); d["vr"] = int(vr.group(1)) if vr else None
     v2 = re.search(r"V2\s+(\d+)", txt); d["v2"] = int(v2.group(1)) if v2 else None
 
-    # Engine detection
+    # Engine detection (from text or default from airframe)
     eng_id, token = detect_engine_in_text(txt)
     d["engine_id"] = eng_id
     d["engine_token"] = token
     d["engine_pretty"] = ENGINE_PRETTY.get(eng_id, "Generic")
 
-    # CG %MAC from full text (if present)
+    # CG %MAC (if present in full OFP)
     d["cg_percent_mac"] = parse_cg_percent(txt)
 
     return d
 
-def derate_level_from_mode(mode: str) -> int:
-    if not mode: return 0
-    m = mode.upper()
-    if m == "D-TO2": return 2
-    if m == "D-TO1": return 1
-    if m == "D-TO":  return 1
-    return 0  # FLEX or unknown
-
-# Map detent labels to numeric "angle-ish" values for comparison
+# --------------------------
+# Flaps label mapping
+# --------------------------
 def detent_numeric_value(label: str, brand: str) -> float:
     t = (label or "").upper().strip()
     if brand == "airbus":
@@ -276,10 +245,8 @@ def detent_numeric_value(label: str, brand: str) -> float:
 def nearest_label_by_value(detents: list[str], value: int) -> Optional[str]:
     numeric_pairs = []
     for lab in detents:
-        try:
-            numeric_pairs.append((lab, float(lab.replace("°", ""))))
-        except:
-            pass
+        try: numeric_pairs.append((lab, float(lab.replace("°",""))))
+        except: pass
     if not numeric_pairs: return None
     best = min(numeric_pairs, key=lambda p: abs(p[1] - value))
     return best[0]
@@ -295,18 +262,62 @@ def choose_selected_label(detents: list[str], numeric_flaps: Optional[int], bran
     return nearest_label_by_value(detents, numeric_flaps)
 
 # --------------------------
-# Stronger N1 estimator (with floor & flap drag)
+# Model helpers & overrides
+# --------------------------
+def derate_level_from_mode(mode: str) -> int:
+    if not mode: return 0
+    m = mode.upper()
+    if m == "D-TO2": return 2
+    if m == "D-TO1": return 1
+    if m == "D-TO":  return 1
+    return 0  # FLEX or unknown
+
+def apply_n1_overrides(series: str, flaps_label: str, tow_klb: float, n1_est: float) -> float:
+    af = get_airframe(series)
+    overrides = af.get("n1_overrides", [])
+    if not overrides:
+        return n1_est
+    # Choose same flaps label; weight_frac is coarse (0..1). We don't have MTOW here,
+    # so pick the first matching label and blend toward target to avoid jumps.
+    candidates = [ov for ov in overrides if ov.get("flaps_label","").upper() == (flaps_label or "").upper()]
+    if not candidates:
+        return n1_est
+    # Simple strategy: pick the median candidate and blend 40% toward target
+    ov = candidates[min(len(candidates)//2, len(candidates)-1)]
+    try:
+        target = float(ov["n1_target"])
+        return 0.6 * n1_est + 0.4 * target
+    except:
+        return n1_est
+
+def maybe_apply_trim_override(series: str, flaps_label: str, tow_klb: float, trim_est: float) -> float:
+    af = get_airframe(series)
+    ovs = af.get("trim_overrides", [])
+    if not ovs: return trim_est
+    candidates = [ov for ov in ovs if ov.get("flaps_label","").upper() == (flaps_label or "").upper()]
+    if not candidates: return trim_est
+    ov = candidates[min(len(candidates)//2, len(candidates)-1)]
+    try:
+        tgt = float(ov["if_trim_pct"])
+        return 0.5 * trim_est + 0.5 * tgt
+    except:
+        return trim_est
+
+# --------------------------
+# N1 estimator (stronger + floor + flaps)
 # --------------------------
 def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float,
                 elev_ft: float, tow_klb: float, bleeds_on: bool, anti_ice_on: bool,
-                thrust_mode: str, brand: str, flaps: Optional[int], header_text: str) -> Dict[str, Any]:
+                thrust_mode: str, brand: str, flaps: Optional[int],
+                header_text: str, series: str) -> Dict[str, Any]:
     """
-    Heuristic model (sim-use only) with guardrails/floor:
+    Heuristic model (sim-use only):
       N1_raw = a + b*(SEL-OAT) + c*(PA_kft) + d*(derate_steps) + e*(TOW - w_ref) + flap_drag
-      N1 = max(N1_raw, N1_floor(weight, pa, flaps)); capped at ~103%
+      N1 = max(N1_raw, floor(weight, PA, flaps)), then blend optional airframe overrides
     """
-    cal = CAL.get(engine_id, CAL.get("generic"))
-    a = cal["a"]; b = cal["b_temp"]; c = cal["c_pa"]; d = cal["d_derate"]; w_ref = cal["w_ref"]; e = cal["e_wt"]
+    cal = ENGINES.get(engine_id, ENGINES.get("generic", {}))
+    a = cal.get("a", 95.0); b = cal.get("b_temp", -0.06); c = cal.get("c_pa", 0.24)
+    d = cal.get("d_derate", -1.5); w_ref = cal.get("w_ref", 300.0); e = cal.get("e_wt", 0.018)
 
     deltaT = (sel_temp_c - oat_c) if (sel_temp_c is not None and oat_c is not None) else 0.0
     pa_ft = pressure_altitude_ft(elev_ft or 0.0, qnh_inhg or 29.92)
@@ -319,82 +330,77 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     if bleeds_on:   n1 += 0.2
     if anti_ice_on: n1 += 0.5
 
-    # Flap drag term (more flaps -> more thrust needed)
-    detents = get_flap_detents(brand, header_text)
+    # Flap drag term (more flaps -> more thrust)
+    detents = get_flap_detents(brand, series)
     sel_label = choose_selected_label(detents, int(flaps or 0), brand)
     sel_val = detent_numeric_value(sel_label or ("1" if brand=="airbus" else "5"), brand)
     base_val = 1.0 if brand=="airbus" else 5.0
-    n1 += 0.35 * max(0.0, sel_val - base_val)   # +0.35% per step above baseline
+    n1 += 0.35 * max(0.0, sel_val - base_val)
 
-    # Guardrail floor: grows with weight ratio, PA, and flaps
+    # Guardrail floor (heavier, higher PA, more flaps => higher floor)
     weight_ratio = max(0.8, (tow_klb or w_ref) / w_ref)
     n1_floor = 88.0 + 5.5*weight_ratio + 0.35*pa_kft + 0.25*max(0.0, sel_val - base_val)
     n1 = max(n1, n1_floor)
     n1 = min(n1, 103.0)  # cap
 
-    # Confidence (still heuristic)
+    # Optional override blend from airframe JSON (keeps continuity but nudges toward guide)
+    n1 = apply_n1_overrides(series, sel_label or "", tow_klb, n1)
+
+    # Confidence band (heuristic)
     conf_pm = 0.6 + 0.06*pa_kft + 0.15*derate_steps
     return {"n1": n1, "conf_pm": conf_pm, "pa_ft": pa_ft}
 
 # --------------------------
-# IF Trim estimation (stronger)
+# IF Trim estimator (stronger + optional overrides)
 # --------------------------
-BASE_TRIM = {
-    "boeing_737":  {"baseline_flaps": 5, "baseline_trim": 10.0, "cg_ref": 24.0},
-    "boeing_757":  {"baseline_flaps": 5, "baseline_trim": 9.0,  "cg_ref": 24.0},
-    "boeing_777":  {"baseline_flaps": 5, "baseline_trim": 8.0,  "cg_ref": 28.0},
-    "boeing_787":  {"baseline_flaps": 5, "baseline_trim": 8.0,  "cg_ref": 28.0},
-    "airbus_a320": {"baseline_flaps": 1, "baseline_trim": 8.0,  "cg_ref": 25.0},
-    "airbus_a321": {"baseline_flaps": 1, "baseline_trim": 9.0,  "cg_ref": 25.0},
-    "airbus_a350": {"baseline_flaps": 1, "baseline_trim": 7.0,  "cg_ref": 25.0},
-    "airbus_a380": {"baseline_flaps": 1, "baseline_trim": 7.0,  "cg_ref": 25.0},
-    "generic":     {"baseline_flaps": 5, "baseline_trim": 8.0,  "cg_ref": 25.0},
-}
-
 def estimate_if_trim(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Heuristic Infinite Flight trim (%) for takeoff:
-      - Start from airframe baseline (brand + typical flap)
-      - Adjust for CG %MAC delta (forward -> more NU)
-      - Adjust for actual flap vs baseline flap
-      - Weight tweak vs engine calibration reference
-    Output: { 'if_trim_pct': float (NU positive), 'label': 'NU'/'ND', 'selected_flaps_label': str }
+    Heuristic Infinite Flight trim (%):
+      - Start from airframe baseline (brand + baseline flaps)
+      - +1.8% per 1%MAC forward of reference CG
+      - -0.6% per flaps unit above baseline
+      - +0.8% per 50k lb above engine cal weight
+      - Optional JSON override blend
     """
     series = data.get("series", "generic")
     brand  = data.get("brand", "boeing")
     flaps  = int(data.get("flaps") or 0)
-    cg_pct = data.get("cg_percent_mac")  # may be None
+    cg_pct = data.get("cg_percent_mac")
     tow_klb = float(data.get("tow_klb") or 0.0)
 
-    base = BASE_TRIM.get(series, BASE_TRIM["generic"])
-    trim = base["baseline_trim"]
-    cg_ref = base["cg_ref"]
-    baseline_flaps = base["baseline_flaps"]
+    af = get_airframe(series)
+    baseline_trim = float(af.get("baseline_trim", 8.0))
+    baseline_flaps = float(af.get("baseline_flaps", 5.0))
+    cg_ref = float(af.get("cg_ref", 25.0))
 
-    detents = get_flap_detents(brand, data.get("header",""))
+    detents = get_flap_detents(brand, series)
     selected_label = choose_selected_label(detents, flaps, brand) or (str(flaps) if brand=="boeing" else "1")
     selected_val = detent_numeric_value(selected_label, brand)
-    baseline_val = float(baseline_flaps)
 
-    # CG adjustment (stronger): +1.8% per 1.0 %MAC forward of ref
+    trim = baseline_trim
+
+    # CG effect
     if cg_pct is not None:
-        cg_delta = (cg_ref - float(cg_pct))
+        cg_delta = (cg_ref - float(cg_pct))  # forward positive
         trim += 1.8 * cg_delta
 
-    # Flaps adjustment (stronger): -0.6% per unit over baseline
-    trim += -0.6 * (selected_val - baseline_val)
+    # Flaps effect (more flaps => less NU)
+    trim += -0.6 * (selected_val - baseline_flaps)
 
-    # Weight tweak (stronger): +0.8% per 50k over reference
-    w_ref = CAL.get(data.get("engine_id","generic"), CAL["generic"])["w_ref"]
+    # Weight tweak vs engine reference
+    w_ref = ENGINES.get(data.get("engine_id","generic"), ENGINES["generic"]).get("w_ref", 300.0)
     trim += 0.8 * ((tow_klb - w_ref) / 50.0)
 
-    # Clamp to sane sim range
+    # Optional overrides from JSON
+    trim = maybe_apply_trim_override(series, selected_label, tow_klb, trim)
+
+    # Clamp
     trim = max(-40.0, min(40.0, trim))
     label = "NU" if trim >= 0 else "ND"
     return {"if_trim_pct": trim, "label": label, "selected_flaps_label": selected_label}
 
 # --------------------------
-# Dials (no numeric readout on the dial; we'll print below)
+# Dials (numeric readout is printed below via Streamlit)
 # --------------------------
 def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title: bool=False):
     import numpy as np
@@ -405,7 +411,7 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title: bool=False):
         frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * (end_deg - start_deg))
     bg, bezel, tick, label = "#0a0f14", (1,1,1,0.05), "#e8edf6", "#e8edf6"
-    normal, bug, band = "#3ccc8c", "#ffd21f", (1,1,1,0.14)
+    band, bug = (1,1,1,0.14), "#ffd21f"
     fig, ax = plt.subplots(figsize=(3.2, 3.2)); ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
     R_outer, R_inner = 1.00, 0.74
@@ -425,19 +431,15 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title: bool=False):
     for val in range(0, 111, 5):
         ang = n1_to_angle(val); major = (val % 10 == 0)
         r2 = R_inner - (0.06 if major else 0.03)
-        x1, y1 = R_outer*np.cos(ang), R_outer*np.sin(ang)
-        x2, y2 = r2*np.cos(ang), r2*np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], color=tick, linewidth=2)
+        ax.plot([R_outer*np.cos(ang), r2*np.cos(ang)],
+                [R_outer*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
         if major and 0 < val < 110:
             rl = r2 - 0.10
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}", ha="center", va="center", fontsize=9, color=label)
-    # Bug pointer
+    # Pointer
     ang_tgt = n1_to_angle(n1)
     ax.plot([0, (R_inner-0.18)*np.cos(ang_tgt)], [0, (R_inner-0.18)*np.sin(ang_tgt)], color=bug, linewidth=3)
     ax.add_artist(plt.Circle((0,0), 0.05, color=label))
-    # No numeric readouts here (we print under the chart)
-    if show_title:
-        ax.text(0, 1.15, "ENGINE N1", ha="center", va="center", fontsize=10, color=label)
     return fig
 
 def draw_n1_dial_airbus(n1: float, conf_pm: float):
@@ -449,7 +451,7 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
         frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * (end_deg - start_deg))
     bg, bezel, tick, label = "#0b0b0b", (1,1,1,0.055), "#e8f2ff", "#e8f2ff"
-    normal, bug, band = "#00ff90", "#ffd21f", (1,1,1,0.13)
+    band, bug = (1,1,1,0.13), "#ffd21f"
     fig, ax = plt.subplots(figsize=(3.2, 3.2)); ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
     R_outer, R_inner = 1.00, 0.74
@@ -469,17 +471,15 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
     for val in range(0, 111, 5):
         ang = n1_to_angle(val); major = (val % 10 == 0)
         r2 = 0.74 - (0.06 if major else 0.03)
-        x1, y1 = 1.00*np.cos(ang), 1.00*np.sin(ang)
-        x2, y2 = r2*np.cos(ang), r2*np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], color=tick, linewidth=2)
+        ax.plot([1.00*np.cos(ang), r2*np.cos(ang)],
+                [1.00*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
         if major and 0 < val < 110:
             rl = r2 - 0.10
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}", ha="center", va="center", fontsize=9, color=label)
-    # Bug pointer
+    # Pointer
     ang_tgt = n1_to_angle(n1)
     ax.plot([0, (0.74-0.18)*np.cos(ang_tgt)], [0, (0.74-0.18)*np.sin(ang_tgt)], color=bug, linewidth=2.5)
     ax.add_artist(plt.Circle((0,0), 0.05, color=label))
-    # No numeric readouts here (we print under the chart)
     return fig
 
 def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None):
@@ -510,7 +510,7 @@ def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = N
     return fig
 
 # --------------------------
-# Performance Card (no mini-graph)
+# Performance Card
 # --------------------------
 def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any], trim: Optional[Dict[str, Any]] = None):
     fig, ax = plt.subplots(figsize=(8.8, 4.4))
@@ -537,7 +537,10 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any], trim: Optional[
         ax.text(0.42, mid_y, f"{label}: {value}", fontsize=10); mid_y -= 0.06
 
     M("OAT (°C)", meta.get("oat_c") or "-")
-    M("QNH (inHg)", meta.get("qnh_inhg") or "-")
+    if meta.get("qnh_inhg") is not None:
+        M("QNH (inHg)", f'{meta["qnh_inhg"]:.2f}')
+    else:
+        M("QNH (inHg)", "-")
     M("Field Elev (ft)", meta.get("elev_ft") or "-")
     M("Press Alt (ft)", f'{result.get("pa_ft",0):,.0f}')
     if meta.get("v1") and meta.get("vr") and meta.get("v2"):
@@ -547,13 +550,11 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any], trim: Optional[
 
     # Right column: headline numbers
     ax.text(0.72, 0.82, "N1 Target", fontsize=10, fontweight="bold")
-    ax.text(0.72, 0.76, f'{result["n1"]:.1f}% ±{result["conf_pm"]:.1f}%', fontsize=16)
-
+    ax.text(0.72, 0.76, f'N1% = {result["n1"]:.1f}% (±{result["conf_pm"]:.1f}%)', fontsize=16)
     if trim is not None:
         ax.text(0.72, 0.64, "IF Trim", fontsize=10, fontweight="bold")
         sign = "+" if trim["if_trim_pct"] >= 0 else ""
         ax.text(0.72, 0.58, f'{sign}{trim["if_trim_pct"]:.0f}% {trim["label"]}', fontsize=16)
-
     return fig
 
 # --------------------------
@@ -569,16 +570,25 @@ st.markdown("---")
 
 if go and txt.strip():
     data = parse_takeoff_text(txt)
-
-    # Engine/brand labels
-    st.write(f"**Detected engine:** {data['engine_pretty']}")
+    series = data.get("series", "generic")
     brand = data.get("brand", detect_brand(data.get("header","")))
+    data["series"] = series
+    data["brand"] = brand
 
-    # Validate inputs needed for N1
-    if None in (data["oat_c"], data["sel_temp_c"], data["qnh_inhg"], data["elev_ft"], data["tow_klb"]):
-        st.warning("Some inputs are missing. Ensure your paste includes OAT, QNH, Elevation, Weight, and SEL TEMP.")
+    # Engine label
+    st.write(f"**Detected engine:** {data.get('engine_pretty', 'Generic')}")
+
+    # Validate required inputs
+    missing = []
+    if data["oat_c"] is None: missing.append("OAT")
+    if data["sel_temp_c"] is None: missing.append("SEL TEMP")
+    if data["qnh_inhg"] is None: missing.append("QNH")
+    if data["elev_ft"] is None: missing.append("Elevation")
+    if data["tow_klb"] is None: missing.append("Weight")
+    if missing:
+        st.error("Missing: " + ", ".join(missing) + ". Ensure your paste includes these fields.")
     else:
-        # Estimate N1
+        # N1 estimate
         res = estimate_n1(
             engine_id=data["engine_id"],
             oat_c=data["oat_c"],
@@ -591,14 +601,15 @@ if go and txt.strip():
             thrust_mode=data["thrust_mode"] or "",
             brand=brand,
             flaps=data["flaps"],
-            header_text=data.get("header","")
+            header_text=data.get("header",""),
+            series=series
         )
         n1 = res["n1"]; conf = res["conf_pm"]
 
-        # Trim (IF %) estimate
+        # Trim estimate
         trim_res = estimate_if_trim(data)
 
-        # Top metrics (include Trim)
+        # Top metrics
         m1, m2, m3, m4 = st.columns([1.2, 1, 1, 1])
         with m1: st.metric("Estimated N1%", f"{n1:.1f}%", f"±{conf:.1f}%")
         with m2: st.metric("Pressure Altitude", f'{res["pa_ft"]:,.0f} ft')
@@ -619,7 +630,7 @@ if go and txt.strip():
                 st.pyplot(draw_n1_dial_airbus(n1, conf), use_container_width=False)
             else:
                 st.pyplot(draw_n1_dial_boeing(n1, conf), use_container_width=False)
-            # Print readout UNDER the dial so it never overlaps
+            # Big, black readout under the dial
             st.markdown(
                 f"""
                 <div style='text-align:center; margin-top:-6px;'>
@@ -634,22 +645,20 @@ if go and txt.strip():
                 unsafe_allow_html=True
             )
 
-
-
         with c2:
             st.caption("Flaps")
-            detents = get_flap_detents(brand, data.get("header",""))
+            detents = get_flap_detents(brand, series)
             flv = int(data.get("flaps") or 0)
-            selected = trim_res["selected_flaps_label"]  # forces 1+F for Airbus when flaps=1
+            selected = trim_res["selected_flaps_label"]  # includes Airbus 1+F behavior
             fig_flaps = draw_flap_detent_guide(detents, selected_label=selected)
             st.pyplot(fig_flaps, use_container_width=False)
 
-        # Performance card (shows IF Trim and TOCG if parsed)
+        # Performance card
         st.subheader("Takeoff Performance Card")
         fig_card = draw_perf_card(data, res, trim=trim_res)
         st.pyplot(fig_card, use_container_width=True)
 
-        # Sensitivity (updated calls to pass brand/flaps/header_text)
+        # Sensitivity (optional; kept for sim pilots)
         st.subheader("Sensitivity")
         c_s1, c_s2 = st.columns(2, gap="large")
 
@@ -668,9 +677,8 @@ if go and txt.strip():
                     bleeds_on=data["bleeds_on"],
                     anti_ice_on=data["anti_ice_on"],
                     thrust_mode=data["thrust_mode"] or "",
-                    brand=brand,
-                    flaps=data["flaps"],
-                    header_text=data.get("header","")
+                    brand=brand, flaps=data["flaps"], header_text=data.get("header",""),
+                    series=series
                 )
                 n1_curve.append(tmp["n1"])
             fig2, ax2 = plt.subplots(figsize=(4.4, 2.4))
@@ -695,9 +703,8 @@ if go and txt.strip():
                     bleeds_on=data["bleeds_on"],
                     anti_ice_on=data["anti_ice_on"],
                     thrust_mode=data["thrust_mode"] or "",
-                    brand=brand,
-                    flaps=data["flaps"],
-                    header_text=data.get("header","")
+                    brand=brand, flaps=data["flaps"], header_text=data.get("header",""),
+                    series=series
                 )
                 pa_curve.append(tmp["n1"])
             fig3, ax3 = plt.subplots(figsize=(4.4, 2.4))
