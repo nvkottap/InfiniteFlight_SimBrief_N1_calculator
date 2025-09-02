@@ -646,13 +646,12 @@ with col_right:
       <div>SEL Temp: <b style="color:#fff;">{sel:.0f}°C</b> &nbsp;|&nbsp; OAT: <b style="color:#fff;">{oat:.0f}°C</b> &nbsp;|&nbsp; QNH: <b style="color:#fff;">{qnh:.2f} inHg</b> &nbsp;|&nbsp; Field Elev: <b style="color:#fff;">{elev:.0f} ft</b> &nbsp;|&nbsp; PA: <b style="color:#fff;">{pa_ft:.0f} ft</b></div>
     """
 
-    if any([v1, vr, v2, vref, gdot]):
+    if any([v1, vr, v2, vref]):
         perf += "<div>"
         if v1:  perf += f"V1: <b>{int(v1)}</b> &nbsp; "
         if vr:  perf += f"VR: <b>{int(vr)}</b> &nbsp; "
         if v2:  perf += f"V2: <b>{int(v2)}</b> &nbsp; "
         if vref: perf += f"VREF: <b>{int(vref)}</b> &nbsp; "
-        if gdot: perf += f"Green Dot: <b>{int(gdot)}</b>"
         perf += "</div>"
     perf += "</div>"
     st.markdown(perf, unsafe_allow_html=True)
