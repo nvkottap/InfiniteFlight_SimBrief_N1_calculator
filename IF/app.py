@@ -1,17 +1,30 @@
-# app.py — Infinite Flight Takeoff N1 & Trim Estimator (Streamlit)
-# v1.3.1 — Boeing dial refined, per-airframe N1 caps, compact flaps + trim diagrams
-
+# app.py
 import re, json, math
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, Optional, List, Tuple
 
+import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-import streamlit as st
 
-# ----------------------------- Robust calibration loader -----------------------------
+st.set_page_config(page_title="IF N1% & Trim Estimator", page_icon="🛫", layout="wide")
 
+# ----------------------------- Utilities -----------------------------
+def pressure_altitude_ft(field_elev_ft: float, qnh_inhg: float) -> float:
+    """Approx pressure altitude using US std formula."""
+    if not qnh_inhg:
+        qnh_inhg = 29.92
+    return (field_elev_ft or 0.0) + (29.92 - qnh_inhg) * 1000.0
+
+def derate_level_from_mode(mode: str) -> int:
+    m = (mode or "").upper().strip()
+    if "D-TO2" in m: return 3
+    if "D-TO1" in m: return 2
+    if "D-TO"  in m or "FLEX" in m: return 1
+    return 0
+
+# ------------------------- Load Calibrations -------------------------
 CALIB_PATH = Path(__file__).with_name("calibrations.json")
 
 _MINIMAL_FALLBACK = {
@@ -19,37 +32,25 @@ _MINIMAL_FALLBACK = {
         "generic": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
     },
     "airframes": {
-        "generic": {
-            "engine_id": "generic", "brand": "boeing",
-            "mtow_klb": 300.0, "n1_max_pct": 101.5,
-            "detents": ["0","5","15","25","30"],
-            "baseline_trim": 8.0, "baseline_flaps": 5, "cg_ref": 25.0,
-            "if_trim_default_pct": 12.0
-        }
+        "generic": { "engine_id": "generic", "brand": "boeing",
+                     "mtow_klb": 300.0, "n1_max_pct": 101.5,
+                     "detents": ["0","5","15","25","30"],
+                     "baseline_trim": 8.0, "baseline_flaps": 5, "cg_ref": 25.0,
+                     "if_trim_default_pct": 12.0 }
     }
 }
 
 def load_calibrations_unified() -> Dict[str, Any]:
     try:
-        with open(CALIB_PATH, "r", encoding="utf-8") as f:
-            raw = f.read()
+        raw = CALIB_PATH.read_text(encoding="utf-8")
         if not raw.strip().startswith("{"):
-            raise ValueError("File does not start with '{' – likely not JSON.")
+            raise ValueError("calibrations.json is not valid JSON (bad start).")
         return json.loads(raw)
     except FileNotFoundError:
         st.warning(f"`{CALIB_PATH.name}` not found. Using minimal built-in calibration.")
         return _MINIMAL_FALLBACK
     except json.JSONDecodeError as e:
-        st.error(f"Invalid JSON in `{CALIB_PATH.name}` at line {e.lineno}, column {e.colno}: {e.msg}")
-        try:
-            with open(CALIB_PATH, "r", encoding="utf-8") as f:
-                bad_lines = f.readlines()
-            start = max(0, e.lineno - 3); end = min(len(bad_lines), e.lineno + 2)
-            preview = "".join(f"{i+1:>4}: {bad_lines[i]}" for i in range(start, end))
-            st.code(preview, language="json")
-        except Exception:
-            pass
-        st.info("Falling back to a minimal internal calibration so the app can still run.")
+        st.error(f"`{CALIB_PATH.name}` invalid JSON at line {e.lineno}, col {e.colno}: {e.msg}")
         return _MINIMAL_FALLBACK
     except Exception as e:
         st.error(f"Could not read `{CALIB_PATH.name}`: {e}")
@@ -59,70 +60,39 @@ CALIB = load_calibrations_unified()
 ENGINES = CALIB.get("engines", {})
 AIRFRAMES = CALIB.get("airframes", {})
 
-# ---------------------------------- Utilities ----------------------------------------
-
-def pressure_altitude_ft(elev_ft: float, qnh_inhg: float) -> float:
-    """Approx pressure altitude from field elevation and QNH (inHg)."""
-    # PA ≈ Elev + (29.92 - QNH)*1000* (1 inHg ≈ 1000 ft)
-    return (elev_ft or 0.0) + (29.92 - float(qnh_inhg or 29.92)) * 1000.0
-
-def derate_level_from_mode(mode: str) -> int:
-    """Map thrust mode strings to step levels."""
-    m = (mode or "").upper()
-    if "D-TO2" in m or "DTO2" in m: return 2
-    if "D-TO1" in m or "DTO1" in m: return 1
-    if "D-TO"  in m or "DTO"  in m: return 1
-    # FLEX maps to assumed temp; treat as derate step 1 by default, we use deltaT too
-    if "FLEX" in m: return 1
-    return 0
-
 def get_flap_detents(brand: str, series: str) -> List[str]:
     af = AIRFRAMES.get(series, {})
     det = af.get("detents")
     if det: return det
-    return ["0","1","1+F","2","3","FULL"] if (brand or "").lower()=="airbus" else ["0","1","2","5","10","15","25","30","40"]
+    if (brand or "").lower() == "airbus":
+        return ["0", "1", "1+F", "2", "3", "FULL"]
+    return ["0","1","2","5","10","15","25","30","40"]
 
-def choose_selected_label(detents: List[str], flaps_numeric: int, brand: str) -> str:
-    # For Airbus, force "1+F" if flaps ~1 (as we agreed earlier)
-    if (brand or "").lower()=="airbus":
-        if flaps_numeric <= 0: return "0"
-        if flaps_numeric == 1: return "1+F"
-        if flaps_numeric in (2,3): return str(flaps_numeric)
-        return "FULL"
-    # Boeing: choose the nearest detent not less than requested numeric
-    try:
-        nums = []
-        for d in detents:
-            n = float(d.replace("°","")) if d not in ("FULL","1+F") else (4.0 if d=="FULL" else 1.0)
-            nums.append((d, n))
-        target = float(flaps_numeric)
-        cands = sorted(nums, key=lambda x: (x[1] < target, abs(x[1]-target)))
-        # prefer >= target if available
-        ge = [d for d,n in nums if n >= target]
-        return ge[0] if ge else cands[0][0]
-    except:
-        return str(flaps_numeric)
+def choose_selected_label(detents: List[str], numeric_flaps: int, brand: str) -> str:
+    if (brand or "").lower() == "airbus":
+        return "1+F" if "1+F" in detents else ("1" if "1" in detents else detents[0])
+    pref = 5
+    if numeric_flaps in [1,5,10,15,25,30,40]: pref = numeric_flaps
+    return str(pref) if str(pref) in detents else detents[0]
 
 def detent_numeric_value(label: str, brand: str) -> float:
     lab = (label or "").upper()
-    if (brand or "").lower()=="airbus":
-        if lab == "FULL": return 4.0
-        if lab in ("3","2"): return float(lab)
-        if lab in ("1","1+F"): return 1.0
-        return 0.0
+    if (brand or "").lower() == "airbus":
+        return {"0":0,"1":1,"1+F":1,"2":2,"3":3,"FULL":4}.get(lab, 0.0)
     try:
         return float(lab.replace("°",""))
     except:
         return 0.0
 
+# ------------------------- Overrides & Estimators -------------------------
 def apply_n1_overrides(series: str, flaps_label: str, tow_klb: float, n1_est: float) -> float:
     af = AIRFRAMES.get(series, {})
-    overs = af.get("n1_overrides", [])
-    if not overs: return n1_est
+    overrides = af.get("n1_overrides", [])
+    if not overrides: return n1_est
     mtow = float(af.get("mtow_klb", 0) or 0)
     if mtow <= 0: return n1_est
     wf = max(0.0, min(1.0, (tow_klb or 0.0)/mtow))
-    cands = [ov for ov in overs if ov.get("flaps_label","").upper()==(flaps_label or "").upper()]
+    cands = [ov for ov in overrides if (ov.get("flaps_label","").upper() == (flaps_label or "").upper())]
     if not cands: return n1_est
     best = min(cands, key=lambda ov: abs(wf - float(ov.get("weight_frac", 0.6))))
     try:
@@ -131,16 +101,12 @@ def apply_n1_overrides(series: str, flaps_label: str, tow_klb: float, n1_est: fl
     except:
         return n1_est
 
-# --------------------------------- Estimators ----------------------------------------
-
 def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float,
                 elev_ft: float, tow_klb: float, bleeds_on: bool, anti_ice_on: bool,
                 thrust_mode: str, brand: str, flaps: Optional[int],
                 header_text: str, series: str) -> Dict[str, Any]:
     """
-    Heuristic N1% (sim-use only):
-      n1 = a + b*(SEL-OAT) + c*(PA_kft) + d*(derate_steps) + e*(TOW - w_ref) + flap_term [+ bleed/ice]
-      Then: adjust derate effectiveness by weight, floor, apply per-airframe cap & overrides.
+    Heuristic N1 model for Infinite Flight (not for real-world ops).
     """
     cal = ENGINES.get(engine_id, ENGINES.get("generic", {}))
     a = cal.get("a", 95.0); b = cal.get("b_temp", -0.06); c = cal.get("c_pa", 0.24)
@@ -154,29 +120,26 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
 
     detents = get_flap_detents(brand, series)
     sel_label = choose_selected_label(detents, int(flaps or 0), brand)
-    sel_val = detent_numeric_value(sel_label or ("1" if (brand or "").lower()=="airbus" else "5"), brand)
+    sel_val = detent_numeric_value(sel_label, brand)
     base_val = 1.0 if (brand or "").lower()=="airbus" else 5.0
 
-    # Base model
     n1 = a + b*deltaT + c*pa_kft + d*derate_steps + e*wt_term
-    if bleeds_on:   n1 += 0.2
+    if bleeds_on: n1 += 0.2
     if anti_ice_on: n1 += 0.5
-    n1 += 0.35 * max(0.0, sel_val - base_val)  # flap drag compensation
+    n1 += 0.35 * max(0.0, sel_val - base_val)
 
-    # Weight-dependent derate effectiveness (apply AFTER base n1 is defined)
     af = AIRFRAMES.get(series, {})
     mtow = float(af.get("mtow_klb", 0) or 0)
     wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow)) if mtow > 0 else 0.6
     n1 += 0.8 * derate_steps * (wf - 0.6)
 
-    # Guardrail floor + per-airframe cap
     weight_ratio = max(0.8, (tow_klb or w_ref) / w_ref)
     n1_floor = 88.0 + 5.5*weight_ratio + 0.35*pa_kft + 0.25*max(0.0, sel_val - base_val)
     n1 = max(n1, n1_floor)
+
     n1_cap = float(af.get("n1_max_pct", 103.0))
     n1 = min(n1, n1_cap)
 
-    # Blend toward any airframe overrides
     n1 = apply_n1_overrides(series, sel_label or "", tow_klb, n1)
 
     conf_pm = 0.6 + 0.06*pa_kft + 0.15*derate_steps
@@ -184,26 +147,22 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
 
 def estimate_trim_if(series: str, brand: str, flaps_label: str, tow_klb: float) -> float:
     """
-    Infinite Flight trim % (−100..+100), NU positive.
-    Uses per-airframe `if_trim_default_pct` → small weight & flap nudges → optional overrides.
+    Infinite Flight trim % (−100..+100), nose-up positive.
+    Uses per-airframe defaults + small weight & flap shaping; blends overrides.
     """
     af = AIRFRAMES.get(series, {})
-    base_map = { "boeing": 12.0, "airbus": 8.0 }
+    base_map = {"boeing": 12.0, "airbus": 8.0}
     base = float(af.get("if_trim_default_pct", base_map.get((brand or "").lower(), 10.0)))
 
     mtow = float(af.get("mtow_klb", 0) or 0)
     wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow)) if mtow > 0 else 0.6
-    k_w = 22.0 if (brand or "").lower()=="boeing" else 16.0
+    k_w = 22.0 if (brand or "").lower() == "boeing" else 16.0
     base += k_w * (wf - 0.6)
 
     def detent_numeric(lab: str) -> float:
         lab = (lab or "").upper()
-        if (brand or "").lower()=="airbus":
-            if lab in ("FULL",): return 4.0
-            if lab in ("3",): return 3.0
-            if lab in ("2",): return 2.0
-            if lab in ("1+F","1"): return 1.0
-            return 0.0
+        if (brand or "").lower() == "airbus":
+            return {"FULL":4.0,"3":3.0,"2":2.0,"1+F":1.0,"1":1.0}.get(lab, 0.0)
         try: return float(lab.replace("°",""))
         except: return 0.0
 
@@ -219,299 +178,340 @@ def estimate_trim_if(series: str, brand: str, flaps_label: str, tow_klb: float) 
             try:
                 target = float(best["if_trim_pct"])
                 base = 0.6*base + 0.4*target
-            except:
-                pass
+            except: pass
 
     return max(-100.0, min(100.0, round(base, 1)))
 
-# --------------------------------- Dial renderers ------------------------------------
-
+# ----------------------------- Drawing -----------------------------
 def draw_n1_dial_boeing(n1_percent: float, max_n1_pct: float = 102.0):
-    """Boeing-style N1 dial (thin bezel, inward yellow chevron, square readout box)."""
-    def pct_to_scale(p): return max(0.0, min(10.0, (p / 100.0) * 10.0))
-    n1_sc = pct_to_scale(n1_percent); max_sc = pct_to_scale(max_n1_pct)
+    """Boeing dial: thin bezel, sharp yellow chevron, square box, red end tick, 0→10 clockwise."""
+    def pct_to_scale(p): return max(0.0, min(10.0, (p/100.0)*10.0))
+    n1_sc  = pct_to_scale(n1_percent)
+    max_sc = pct_to_scale(max_n1_pct)
 
-    start_deg = 0.0                          # 3 o'clock
-    end_deg   = -225.0 * min(1.0, max_sc/10.0)  # to ~10:30
+    start_deg = 0.0
+    end_deg   = -225.0 * min(1.0, max_sc/10.0)
     to_rad    = np.deg2rad
 
-    bg = "#0a0f14"; white = "#ffffff"
-    bezel_color = white; tick_color = white; label_color = white
-    red_tick = "#d84b4b"; chevron = "#ffd21f"
-
+    bg="#0a0f14"; white="#ffffff"; red="#d84b4b"; chevron="#ffd21f"
     fig, ax = plt.subplots(figsize=(3.6, 3.6))
     ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
-    R_ring = 0.98; ring_lw = 2.6
-    tick_len_major = 0.11; tick_len_minor = 0.06
-    font_small = 9; font_big = 15
+    R_ring=0.98; ring_lw=2.6
+    tick_len_major=0.11; tick_len_minor=0.06
+    font_small=9; font_big=15
 
     def scale_to_angle(v):
-        frac = max(0.0, min(1.0, v / max(1e-6, max_sc)))
-        return to_rad(start_deg + frac * (end_deg - start_deg))
+        frac = max(0.0, min(1.0, v/max(1e-6, max_sc)))
+        return to_rad(start_deg + frac*(end_deg - start_deg))
 
     # Bezel
     theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 720)
-    ax.plot(R_ring*np.cos(theta), R_ring*np.sin(theta), color=bezel_color,
-            linewidth=ring_lw, solid_capstyle='round', zorder=2)
+    ax.plot(R_ring*np.cos(theta), R_ring*np.sin(theta),
+            color=white, linewidth=ring_lw, solid_capstyle='round', zorder=2)
 
-    # Internal ticks & even-number labels
+    # Internal ticks & labels
     for v in np.arange(0, 10.1, 1.0):
         if v > max_sc + 1e-6: continue
-        ang = scale_to_angle(v)
-        is_major = (int(v) % 2 == 0)
-        tlen = tick_len_major if is_major else tick_len_minor
-        x1, y1 = R_ring*np.cos(ang), R_ring*np.sin(ang)
-        x2, y2 = (R_ring - tlen)*np.cos(ang), (R_ring - tlen)*np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], color=tick_color, linewidth=2 if is_major else 1.2, zorder=3)
+        ang=scale_to_angle(v)
+        is_major=(int(v)%2==0)
+        tlen=tick_len_major if is_major else tick_len_minor
+        x1,y1 = R_ring*np.cos(ang), R_ring*np.sin(ang)
+        x2,y2 = (R_ring - tlen)*np.cos(ang), (R_ring - tlen)*np.sin(ang)
+        ax.plot([x1,x2],[y1,y2], color=white, linewidth=2 if is_major else 1.2, zorder=3)
         if is_major:
-            rl = R_ring - tlen - 0.08
+            rl=R_ring - tlen - 0.08
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{int(v)}",
-                    ha="center", va="center", fontsize=font_small, color=label_color, zorder=4)
+                    ha="center", va="center", fontsize=font_small, color=white, zorder=4)
 
     # Red max tick
-    ang_max = scale_to_angle(max_sc)
-    x1m, y1m = R_ring*np.cos(ang_max), R_ring*np.sin(ang_max)
-    x2m, y2m = (R_ring - tick_len_major - 0.02)*np.cos(ang_max), (R_ring - tick_len_major - 0.02)*np.sin(ang_max)
-    ax.plot([x1m, x2m], [y1m, y2m], color=red_tick, linewidth=3, zorder=4)
+    ang_max=scale_to_angle(max_sc)
+    x1m,y1m=R_ring*np.cos(ang_max), R_ring*np.sin(ang_max)
+    x2m,y2m=(R_ring - tick_len_major - 0.02)*np.cos(ang_max), (R_ring - tick_len_major - 0.02)*np.sin(ang_max)
+    ax.plot([x1m,x2m],[y1m,y2m], color=red, linewidth=3, zorder=4)
 
-    # Yellow chevron (outline), sharp, pointing inward
-    ang_n1  = scale_to_angle(min(max(n1_sc, 0.0), max_sc))
-    tip_r   = R_ring - 0.008
-    base_r  = R_ring + 0.045
-    spread  = math.radians(3.0)
-    tip     = np.array([tip_r*np.cos(ang_n1),  tip_r*np.sin(ang_n1)])
-    left    = np.array([base_r*np.cos(ang_n1 + spread), base_r*np.sin(ang_n1 + spread)])
-    right   = np.array([base_r*np.cos(ang_n1 - spread), base_r*np.sin(ang_n1 - spread)])
-    ax.plot([left[0],  tip[0]],  [left[1],  tip[1]],  color=chevron, linewidth=2.4, solid_capstyle='round', zorder=6)
+    # Yellow chevron (sharp), inward
+    ang_n1=scale_to_angle(min(max(n1_sc,0.0), max_sc))
+    tip_r = R_ring - 0.008
+    base_r= R_ring + 0.045
+    spread= math.radians(3.0)
+    tip   = np.array([tip_r*np.cos(ang_n1),  tip_r*np.sin(ang_n1)])
+    left  = np.array([base_r*np.cos(ang_n1 + spread), base_r*np.sin(ang_n1 + spread)])
+    right = np.array([base_r*np.cos(ang_n1 - spread), base_r*np.sin(ang_n1 - spread)])
+    ax.plot([left[0], tip[0]],  [left[1], tip[1]],  color=chevron, linewidth=2.4, solid_capstyle='round', zorder=6)
     ax.plot([right[0], tip[0]], [right[1], tip[1]], color=chevron, linewidth=2.4, solid_capstyle='round', zorder=6)
 
-    # Square digital box at 0 mark (lifted)
-    ang0 = scale_to_angle(0.0)
-    anchor_r = R_ring + 0.34
-    anchor_x, anchor_y = anchor_r*np.cos(ang0), anchor_r*np.sin(ang0)
-    box_w, box_h = 0.60, 0.26
-    ll = (anchor_x - box_w/2, anchor_y)
-    rect = patches.Rectangle(ll, box_w, box_h, linewidth=2, edgecolor=white, facecolor=(0,0,0,0.0), zorder=10)
+    # Square digital box at 0 mark, lifted
+    ang0=scale_to_angle(0.0)
+    anchor_r=R_ring + 0.34
+    anchor_x,anchor_y = anchor_r*np.cos(ang0), anchor_r*np.sin(ang0)
+    box_w,box_h = 0.60, 0.26
+    ll=(anchor_x - box_w/2, anchor_y)
+    rect=patches.Rectangle(ll, box_w, box_h, linewidth=2, edgecolor=white, facecolor=(0,0,0,0.0), zorder=10)
     ax.add_patch(rect)
-    cx, cy = (anchor_x, anchor_y + box_h/2)
-    ax.text(cx, cy + 0.01, f"{(n1_percent/10):.1f}" if False else f"{(n1_percent/100.0)*10.0:.1f}",
-            ha="center", va="center", fontsize=font_big, fontweight="bold", color=white, zorder=11)
-
+    cx,cy = (anchor_x, anchor_y + box_h/2)
+    ax.text(cx, cy + 0.01, f"{n1_sc:.1f}", ha="center", va="center",
+            fontsize=font_big, fontweight="bold", color=white, zorder=11)
     return fig
 
 def draw_n1_dial_airbus(n1_percent: float, max_n1_pct: float = 100.0):
-    """Airbus-style N1 dial: thin arc + inner ticks, small white needle, green centered readout."""
-    def pct_to_scale(p): return max(0.0, min(10.0, (p / 100.0) * 10.0))
-    n1_sc = pct_to_scale(n1_percent); max_sc = pct_to_scale(max_n1_pct)
+    """Airbus dial: thin bezel, inner ticks, small white needle, red overboost, stacked green readout."""
+    def pct_to_scale(p): return max(0.0, min(10.0, (p/100.0)*10.0))
+    n1_sc=pct_to_scale(n1_percent); max_sc=pct_to_scale(max_n1_pct)
 
-    start_deg = -225.0; end_deg = -45.0; to_rad = np.deg2rad
-    bg = "#0a0f14"; white = "#ffffff"; green = "#7CFF5A"; red = "#d84b4b"
+    start_deg=-225.0; end_deg=-45.0; to_rad=np.deg2rad
+    bg="#0a0f14"; white="#ffffff"; green="#7CFF5A"; red="#d84b4b"
 
-    fig, ax = plt.subplots(figsize=(3.6, 3.6))
+    fig, ax = plt.subplots(figsize=(3.6,3.6))
     ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
-    R_outer = 1.00; ring_lw = 2.6; tick_len = 0.06
-    font_mark = 10; font_val = 18
-
+    R_outer=1.00; ring_lw=2.2; tick_len=0.05
     def scale_to_angle(v):
-        frac = max(0.0, min(1.0, v/10.0))
-        return to_rad(start_deg + frac * (end_deg - start_deg))
+        frac=max(0.0,min(1.0,v/10.0)); return to_rad(start_deg + frac*(end_deg-start_deg))
 
-    theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 720)
-    ax.plot(R_outer*np.cos(theta), R_outer*np.sin(theta), color=white,
-            linewidth=ring_lw, solid_capstyle='round', zorder=2)
+    theta=np.linspace(to_rad(start_deg), to_rad(end_deg), 720)
+    ax.plot(R_outer*np.cos(theta), R_outer*np.sin(theta),
+            color=white, linewidth=ring_lw, solid_capstyle='round', zorder=2)
 
-    for v in np.arange(0, 10.1, 1.0):
-        ang = scale_to_angle(v)
-        x1, y1 = R_outer*np.cos(ang), R_outer*np.sin(ang)
-        x2, y2 = (R_outer - tick_len)*np.cos(ang), (R_outer - tick_len)*np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], color=white, linewidth=1.4, zorder=3)
-        if abs(v-5.0) < 0.01 or abs(v-10.0) < 0.01:
-            rl = R_outer - tick_len - 0.10
+    for v in np.arange(0,10.1,1.0):
+        ang=scale_to_angle(v)
+        x1,y1=R_outer*np.cos(ang), R_outer*np.sin(ang)
+        x2,y2=(R_outer - tick_len)*np.cos(ang), (R_outer - tick_len)*np.sin(ang)
+        ax.plot([x1,x2],[y1,y2], color=white, linewidth=1.2, zorder=3)
+        if abs(v-5.0)<0.01 or abs(v-10.0)<0.01:
+            rl=R_outer - tick_len - 0.10
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{int(v)}",
-                    ha="center", va="center", fontsize=font_mark, color=white, zorder=4)
+                    ha="center", va="center", fontsize=9, color=white, zorder=4)
 
-    # Red overboost segment: last ~0.8 near max
-    over_lo = max(0.0, 9.2); over_hi = min(10.0, max_sc)
-    if over_hi > over_lo:
-        t_over = np.linspace(scale_to_angle(over_lo), scale_to_angle(over_hi), 60)
+    over_lo=max(0.0,9.3); over_hi=min(10.0,max_sc)
+    if over_hi>over_lo:
+        t_over=np.linspace(scale_to_angle(over_lo), scale_to_angle(over_hi), 60)
         ax.plot(R_outer*np.cos(t_over), R_outer*np.sin(t_over),
-                color=red, linewidth=ring_lw+0.6, solid_capstyle='butt', zorder=5)
+                color=red, linewidth=ring_lw+0.5, solid_capstyle='butt', zorder=5)
 
-    # Small white needle
-    ang_n1 = scale_to_angle(n1_sc)
-    needle_r1 = 0.78; needle_r2 = R_outer - 0.04
+    ang_n1=scale_to_angle(n1_sc)
+    needle_r1=0.78; needle_r2=R_outer - 0.04
     ax.plot([needle_r1*np.cos(ang_n1), needle_r2*np.cos(ang_n1)],
             [needle_r1*np.sin(ang_n1), needle_r2*np.sin(ang_n1)],
-            color=white, linewidth=2.2, solid_capstyle='round', zorder=6)
+            color=white, linewidth=2.0, solid_capstyle='round', zorder=6)
 
-    # Centered green readout
-    ax.text(0, 0.08, "N1%", ha="center", va="center", fontsize=12, color=green, zorder=7)
-    ax.text(0, -0.02, f"{n1_percent:.1f}", ha="center", va="center",
-            fontsize=font_val, fontweight="bold", color=green, zorder=7)
-    ax.text(0, -0.13, "%", ha="center", va="center", fontsize=12, color=green, zorder=7)
-
-    return fig
-
-# ----------------------------- Compact flaps + trim diagrams --------------------------
-
-def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str):
-    fig, ax = plt.subplots(figsize=(2.2, 3.0))
-    ax.set_facecolor("#0a0f14"); fig.patch.set_facecolor("#0a0f14")
-    for s in ax.spines.values(): s.set_visible(False)
-    ax.get_xaxis().set_visible(False)
-    ax.set_ylim(-0.5, len(detents) - 0.5); ax.set_xlim(0, 1)
-    ax.plot([0.5, 0.5], [0, len(detents)-1], color="#ffffff", linewidth=2.0)
-    for i, lab in enumerate(detents):
-        ax.plot([0.42, 0.58], [i, i], color="#ffffff", linewidth=1.6)
-        ax.text(0.62, i, lab, va="center", ha="left", fontsize=10, color="#ffffff")
-    if selected_label in detents:
-        idx = detents.index(selected_label)
-        ax.add_patch(plt.Rectangle((0.25, idx-0.35), 0.5, 0.7, fill=False,
-                                   edgecolor="#ffd21f", linewidth=2.0))
-    ax.text(0.5, len(detents)-0.2, "FLAPS", ha="center", va="bottom",
-            fontsize=10, color="#ffffff", fontweight="bold")
-    ax.text(0.5, -0.2, f"{selected_label}", ha="center", va="top", fontsize=10, color="#ffffff")
-    ax.set_yticks([])
+    ax.text(0, 0.09, "N1%", ha="center", va="center", fontsize=11, color=green, zorder=7)
+    ax.text(0, -0.01, f"{n1_percent:.1f}", ha="center", va="center",
+            fontsize=17, fontweight="bold", color=green, zorder=7)
+    ax.text(0, -0.12, "%", ha="center", va="center", fontsize=11, color=green, zorder=7)
     return fig
 
 def draw_trim_bar(trim_pct: float):
+    """Compact vertical trim bar −100..+100% with neutral marker."""
     trim_pct = max(-100.0, min(100.0, float(trim_pct or 0)))
     fig, ax = plt.subplots(figsize=(2.0, 3.0))
     ax.set_facecolor("#0a0f14"); fig.patch.set_facecolor("#0a0f14")
     for s in ax.spines.values(): s.set_visible(False)
-    ax.set_xlim(0, 1); ax.set_ylim(-100, 100); ax.get_xaxis().set_visible(False)
-    ax.plot([0.5, 0.5], [-100, 100], color="#ffffff", linewidth=2.2)
-    for t in range(-100, 101, 20):
-        ax.plot([0.42, 0.58], [t, t], color="#ffffff", linewidth=1.2)
-    ax.plot([0.38, 0.62], [0, 0], color="#ffffff", linewidth=2.0)
-    ax.plot([0.5], [trim_pct], marker="o", markersize=8, markerfacecolor="#ffd21f", markeredgecolor="#ffd21f")
-    ax.text(0.5, 105, "TRIM", ha="center", va="bottom", fontsize=10, color="#ffffff", fontweight="bold")
-    ax.text(0.5, -115, f"{trim_pct:.0f}%", ha="center", va="top", fontsize=10, color="#ffffff")
+    ax.set_xlim(0,1); ax.set_ylim(-100,100); ax.get_xaxis().set_visible(False)
+    ax.plot([0.5,0.5],[-100,100], color="#ffffff", linewidth=2.2)
+    for t in range(-100,101,20):
+        ax.plot([0.42,0.58],[t,t], color="#ffffff", linewidth=1.2)
+    ax.plot([0.38,0.62],[0,0], color="#ffffff", linewidth=2.0)
+    ax.plot([0.5],[trim_pct], marker="o", markersize=8,
+            markerfacecolor="#ffd21f", markeredgecolor="#ffd21f")
+    ax.text(0.5,105,"TRIM", ha="center", va="bottom", fontsize=10, color="#ffffff", fontweight="bold")
+    ax.text(0.5,-115,f"{trim_pct:.0f}%", ha="center", va="top", fontsize=10, color="#ffffff")
     ax.set_yticks([])
     return fig
 
-# --------------------------------- Paste parser --------------------------------------
+def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str):
+    """
+    Compact flap ladder: visually top→bottom = 0 → … → FULL (or 40).
+    Labels on the LEFT; highlight hugs ladder segment only (no overlap with text).
+    """
+    fig, ax = plt.subplots(figsize=(2.2, 3.0))
+    bg = "#0a0f14"; white="#ffffff"; yellow="#ffd21f"
+    ax.set_facecolor(bg); fig.patch.set_facecolor(bg)
+    for s in ax.spines.values(): s.set_visible(False)
+    ax.get_xaxis().set_visible(False)
 
-PAT_FIELD = re.compile(r"\b(OAT|QNH|ELEV|WEIGHT|SEL\s*TEMP|THRUST|FLAPS|APT|RWY|BLEEDS|A/ICE)\b[:\s]+([A-Z0-9+\-./]+)", re.I)
-PAT_HEADER = re.compile(r"TAKEOFF PERFORMANCE\s+([A-Z0-9\-]+)\s+([A-Z0-9\-\s/]+)\s+([A-Z0-9\-\s/]+)", re.I)
+    detents_draw = detents[:]  # draw in provided order; visual is top index 0 to bottom index N-1
+    n = len(detents_draw)
+    ax.set_ylim(-0.5, n-0.5); ax.set_xlim(0,1)
 
-def parse_block(text: str) -> Dict[str, Any]:
-    out = {}
-    m = PAT_HEADER.search(text or "")
-    if m:
-        out["reg"] = m.group(1).strip()
-        # m.group(2) likely type (e.g., A350-900)
-        out["type"] = m.group(2).strip()
-        out["engine_text"] = m.group(3).strip()
-    for k, v in PAT_FIELD.findall(text or ""):
-        key = k.upper().replace(" ", "")
-        out[key] = v
-    # Also capture numeric V1/VR/V2 if needed later (not used for N1 calc)
+    x_ladder = 0.62
+    ax.plot([x_ladder, x_ladder], [0, n-1], color=white, linewidth=2.0)
+
+    for i, lab in enumerate(detents_draw):
+        ax.plot([x_ladder-0.06, x_ladder+0.06], [i, i], color=white, linewidth=1.6)
+        ax.text(x_ladder-0.10, i, lab, va="center", ha="right", fontsize=10, color=white)
+
+    if selected_label in detents_draw:
+        idx = detents_draw.index(selected_label)
+        ax.add_patch(plt.Rectangle((x_ladder-0.08, idx-0.35), 0.16, 0.7,
+                                   fill=False, edgecolor=yellow, linewidth=2.0))
+
+    ax.text(0.5, n-0.2, "FLAPS", ha="center", va="bottom",
+            fontsize=10, color=white, fontweight="bold")
+    ax.text(0.5, -0.2, f"{selected_label}", ha="center", va="top",
+            fontsize=10, color=white)
+    ax.set_yticks([])
+    return fig
+
+# ----------------------------- Parser -----------------------------
+PASTE_KEYS = {
+    "OAT": r"\bOAT\s+(-?\d+)",
+    "QNH": r"\bQNH\s+(\d{2}\.\d{2}|\d{3,4})",
+    "ELEV": r"\bELEV\s+(-?\d+)",
+    "WEIGHT": r"\bWEIGHT\s+(\d{3}\.\d|\d{2,3})",
+    "SEL": r"\bSEL\s+TEMP\s+(\d{1,2})|\bSEL\s+(\d{1,2})",
+    "THRUST": r"\bTHRUST\s+([A-Z0-9\-+ ]+)",
+    "FLAPS_OUT": r"\bFLAPS\s+(\d{1,2})\b|\bFLAPS\s+(FULL|1\+F|1|2|3)",
+    "BLEEDS": r"\bBLEEDS\s+(ON|OFF)",
+    "AICE": r"\bA/ICE\s+(ON|OFF)",
+    "APT": r"\bAPT\s+([A-Z]{4})\/?([A-Z]{3})?",
+    "RWY": r"\bRWY\s+([0-9]{2}[LRC]?)/\+\d|\bRWY\s+([0-9]{2}[LRC]?)",
+    "ENGINE_LINE": r"TAKEOFF PERFORMANCE.*\n([N0-9A-Z\- ]+?)\n",
+    "TYPE": r"N\d+\s+([A-Z0-9\- ]+?)\s+(LEAP|CFM|PW|GE|TRENT|XWB|CFM56|GE90|PW20|LEAP-1B|LEAP-1A)",
+    # V-speeds (and related)
+    "V1": r"\bV1\s+(\d{2,3})\b",
+    "VR": r"\bVR\s+(\d{2,3})\b",
+    "V2": r"\bV2\s+(\d{2,3})\b",
+    "VREF": r"\bVREF(?:30|40)?\s+(\d{2,3})\b",
+    "GREENDOT": r"\bGREEN\s+DOT\s+(\d{2,3})\b"
+}
+
+def parse_paste(text: str) -> Dict[str, Any]:
+    t = text.replace("\u00a0"," ")
+    out: Dict[str, Any] = {}
+    for k, pat in PASTE_KEYS.items():
+        m = re.search(pat, t, re.IGNORECASE)
+        if not m: continue
+        if k == "SEL":
+            out["SEL"] = float(next(g for g in m.groups() if g))
+        elif k == "FLAPS_OUT":
+            g = next((g for g in m.groups() if g), None)
+            out["FLAPS_OUT"] = (g.upper() if g else None)
+        elif k == "TYPE":
+            out["TYPE"] = m.group(1).strip().upper()
+        elif k == "ENGINE_LINE":
+            out["ENGINE_LINE"] = m.group(1).strip().upper()
+        elif k in ("OAT","ELEV","WEIGHT","V1","VR","V2","VREF","GREENDOT"):
+            out[k] = float(m.group(1))
+        elif k == "QNH":
+            q = m.group(1)
+            out["QNH"] = float(q) if "." in q else round(float(q)/33.8639, 2)
+        else:
+            out[k] = m.group(1).strip().upper()
     return out
 
-def infer_series_and_brand(ac_type: str) -> (str, str):
-    t = (ac_type or "").upper()
-    if "737" in t and "MAX" in t: return "boeing_737_max8", "boeing"
-    if "777" in t: return "boeing_777", "boeing"
-    if "787" in t: return "boeing_787", "boeing"
-    if "757" in t: return "boeing_757", "boeing"
-    if "A380" in t: return "airbus_a380", "airbus"
-    if "A350" in t: return "airbus_a350", "airbus"
-    if "A321" in t: return "airbus_a321", "airbus"
-    if "A320" in t: return "airbus_a320", "airbus"
-    if "A330" in t: return "airbus_a330", "airbus"
-    return "generic", "boeing"
+def guess_series_and_brand(parsed: Dict[str,Any]) -> Tuple[str,str]:
+    raw = (parsed.get("TYPE") or parsed.get("ENGINE_LINE") or "").upper()
+    if "A380" in raw: return "airbus_a380", "airbus"
+    if "A350" in raw: return "airbus_a350", "airbus"
+    if "A321" in raw: return "airbus_a321", "airbus"
+    if "A320" in raw: return "airbus_a320", "airbus"
+    if "A330" in raw: return "airbus_a330", "airbus"
+    if "737 MAX" in raw or "B737 MAX" in raw or "737-8" in raw: return "boeing_737_max8","boeing"
+    if "B777" in raw or "777-" in raw or "B777-200" in raw or "777-200" in raw: return "boeing_777","boeing"
+    if "B757" in raw or "757-" in raw: return "boeing_757","boeing"
+    if "B787" in raw or "787-" in raw: return "boeing_787","boeing"
+    if "AIRBUS" in raw: return "generic","airbus"
+    if "BOEING" in raw: return "generic","boeing"
+    return "generic","boeing"
 
-# ------------------------------------ UI ---------------------------------------------
+# ----------------------------- UI -----------------------------
+st.title("SimBrief Takeoff Performance to Infinite Flight Converter Tool")
 
-st.set_page_config(page_title="IF N1 & Trim", page_icon="✈️", layout="wide")
-st.title("Infinite Flight • Takeoff N1% & Trim Estimator")
+txt = st.text_area(
+    "Paste your SimBrief-style TAKEOFF PERFORMANCE block:",
+    height=220,
+    placeholder="Paste the block here..."
+)
 
-st.caption("Paste your SimBrief-style **TAKEOFF PERFORMANCE** block below, then click **Estimate N1%**.")
+mid = st.columns([1,4,1])[1]
+with mid:
+    go = st.button("Estimate N1%")
 
-paste = st.text_area("Paste block", height=260, placeholder="Paste your TAKEOFF PERFORMANCE text here...")
-if st.button("Estimate N1%", type="primary"):
-    data = parse_block(paste)
-    missing_keys = []
-    for req in ("OAT","QNH","ELEV","WEIGHT","SELTEMP","THRUST","FLAPS"):
-        if req not in data:
-            # accept alternative "SEL TEMP" w/ space already normalized to SELTEMP above
-            if req=="SELTEMP" and "SELTEMP" in (key.replace(" ","") for key in data.keys()):
-                continue
-            missing_keys.append(req)
-    if missing_keys:
-        st.error("Some inputs are missing. Ensure your paste includes OAT, QNH, ELEV, WEIGHT, SEL TEMP, THRUST, and FLAPS.")
+if go:
+    data = parse_paste(txt or "")
+    missing = []
+    for need in ("OAT","QNH","ELEV","WEIGHT","SEL","THRUST"):
+        if need not in data: missing.append(need)
+    if missing:
+        st.error("Some inputs are missing. Ensure your paste includes OAT, QNH, ELEV, WEIGHT, SEL TEMP, THRUST.")
         st.stop()
 
-    # Resolve inputs
-    ac_type = data.get("type","")
-    series, brand = infer_series_and_brand(ac_type)
-    engine_id = AIRFRAMES.get(series, {}).get("engine_id", "generic")
+    series, brand = guess_series_and_brand(data)
+    af = AIRFRAMES.get(series, {})
+    engine_id = af.get("engine_id","generic")
 
-    try:
-        oat = float(data.get("OAT"))
-        qnh = float(data.get("QNH"))
-        elev = float(data.get("ELEV"))
-        tow_klb = float(data.get("WEIGHT"))
-        sel_temp = float(data.get("SELTEMP") or data.get("SELTEMP", "0"))
-    except Exception:
-        st.error("Could not parse numeric values (OAT, QNH, ELEV, WEIGHT, SEL TEMP).")
-        st.stop()
+    oat = data["OAT"]; sel = data["SEL"]; qnh = data["QNH"]; elev = data["ELEV"]
+    tow_klb = data["WEIGHT"]; thrust_mode = data.get("THRUST","")
+    bleeds_on = (data.get("BLEEDS","ON") == "ON"); anti_ice_on = (data.get("AICE","OFF") == "ON")
 
-    thrust_mode = (data.get("THRUST") or "").upper()
-    bleeds_on = (data.get("BLEEDS","ON").upper() == "ON")
-    anti_ice_on = (data.get("A/ICE","OFF").upper() == "ON")
+    res = estimate_n1(engine_id=engine_id, oat_c=oat, sel_temp_c=sel, qnh_inhg=qnh, elev_ft=elev,
+                      tow_klb=tow_klb, bleeds_on=bleeds_on, anti_ice_on=anti_ice_on,
+                      thrust_mode=thrust_mode, brand=brand, flaps=0,
+                      header_text=data.get("ENGINE_LINE",""), series=series)
+    n1 = float(res["n1"]); pa_ft = float(res["pa_ft"])
+    selected_flaps_label = res["flaps_label"]
 
-    try:
-        flaps_val = int(data.get("FLAPS") or "5")
-    except:
-        flaps_val = 5
+    trim_pct = estimate_trim_if(series=series, brand=brand,
+                                flaps_label=selected_flaps_label, tow_klb=tow_klb)
 
-    # Estimate N1
-    res = estimate_n1(
-        engine_id=engine_id, oat_c=oat, sel_temp_c=sel_temp, qnh_inhg=qnh,
-        elev_ft=elev, tow_klb=tow_klb, bleeds_on=bleeds_on, anti_ice_on=anti_ice_on,
-        thrust_mode=thrust_mode, brand=brand, flaps=flaps_val,
-        header_text=paste, series=series
-    )
-    n1 = res["n1"]; conf = res["conf_pm"]; pa_ft = res["pa_ft"]; selected_flaps_label = res["flaps_label"]
+    # -------- Metrics strip (top) --------
+    v1 = data.get("V1"); vr = data.get("VR"); v2 = data.get("V2")
+    vref = data.get("VREF"); gdot = data.get("GREENDOT")
 
-    # Estimate Trim
-    trim_pct = estimate_trim_if(series=series, brand=brand, flaps_label=selected_flaps_label, tow_klb=tow_klb)
+    metrics_html = f"""
+    <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center;
+                padding:12px; border:1px solid #222; border-radius:10px; background:#0b0f15;">
+      <div><span style="opacity:0.7">N1</span> <span style="font-weight:800">{n1:.1f}%</span></div>
+      <div><span style="opacity:0.7">Flaps</span> <span style="font-weight:800">{selected_flaps_label}</span></div>
+      <div><span style="opacity:0.7">Trim</span> <span style="font-weight:800">{trim_pct:.0f}%</span></div>
+      <div><span style="opacity:0.7">PA</span> <span style="font-weight:800">{pa_ft:.0f} ft</span></div>
+    """
+    if v1: metrics_html += f'<div><span style="opacity:0.7">V1</span> <span style="font-weight:800">{int(v1)}</span></div>'
+    if vr: metrics_html += f'<div><span style="opacity:0.7">VR</span> <span style="font-weight:800">{int(vr)}</span></div>'
+    if v2: metrics_html += f'<div><span style="opacity:0.7">V2</span> <span style="font-weight:800">{int(v2)}</span></div>'
+    if vref: metrics_html += f'<div><span style="opacity:0.7">VREF</span> <span style="font-weight:800">{int(vref)}</span></div>'
+    if gdot: metrics_html += f'<div><span style="opacity:0.7">Green Dot</span> <span style="font-weight:800">{int(gdot)}</span></div>'
+    metrics_html += "</div>"
+    st.markdown(metrics_html, unsafe_allow_html=True)
 
-    # Performance card
-    colA, colB, colC, colD = st.columns(4)
-    colA.metric("Aircraft", ac_type or series.replace("_"," ").title())
-    colB.metric("Thrust Mode", thrust_mode or "TO/GA")
-    colC.metric("Selected Temp", f"{sel_temp:.0f}°C")
-    colD.metric("Pressure Alt", f"{pa_ft:.0f} ft")
-
-    # Dial + small diagrams
+    # -------- Diagram row --------
     col_dial, col_right = st.columns([3, 2], gap="large")
+
     with col_dial:
-        max_cap = AIRFRAMES.get(series, {}).get("n1_max_pct", 102.0)
-        if (brand or "").lower()=="airbus":
-            st.pyplot(draw_n1_dial_airbus(n1_percent=n1, max_n1_pct=max_cap), use_container_width=False)
+        n1_cap = af.get("n1_max_pct", 102.0)
+        if (brand or "").lower() == "boeing":
+            fig = draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=n1_cap)
         else:
-            st.pyplot(draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=max_cap), use_container_width=False)
+            fig = draw_n1_dial_airbus(n1_percent=n1, max_n1_pct=n1_cap)
+        st.pyplot(fig, use_container_width=False)
 
     with col_right:
         s1, s2 = st.columns(2)
         with s1:
-            detents = AIRFRAMES.get(series, {}).get("detents", get_flap_detents(brand, series))
+            detents = get_flap_detents(brand, series)
             st.pyplot(draw_flap_detents_small(brand, detents, selected_flaps_label), use_container_width=False)
         with s2:
             st.pyplot(draw_trim_bar(trim_pct), use_container_width=False)
 
-    # Big, easy-to-read headline (top-center style)
-    st.markdown(
-        f"""
-        <div style="text-align:center; font-size:1.6rem; font-weight:800; margin-top:-0.5rem;">
-            N1% = {n1:.1f}% &nbsp;&nbsp;&nbsp; Trim = {trim_pct:.0f}%
-        </div>
-        """, unsafe_allow_html=True
-    )
+    # -------- Performance card (bottom) --------
+    perf = f"""
+    <div style="margin-top:10px; padding:14px; border:1px solid #222; border-radius:10px; background:#0b0f15;">
+      <div style="font-size:1.05rem; font-weight:700; margin-bottom:6px;">Performance Summary</div>
+      <div>Series: <b>{series.replace('_',' ').title()}</b> | Brand: <b>{brand.title()}</b> | Thrust: <b>{thrust_mode}</b></div>
+      <div>SEL Temp: <b>{sel:.0f}°C</b> | OAT: <b>{oat:.0f}°C</b> | QNH: <b>{qnh:.2f} inHg</b> | Field Elev: <b>{elev:.0f} ft</b> | PA: <b>{pa_ft:.0f} ft</b></div>
+    """
+    if any([v1, vr, v2, vref, gdot]):
+        perf += "<div>"
+        if v1:  perf += f"V1: <b>{int(v1)}</b> &nbsp; "
+        if vr:  perf += f"VR: <b>{int(vr)}</b> &nbsp; "
+        if v2:  perf += f"V2: <b>{int(v2)}</b> &nbsp; "
+        if vref: perf += f"VREF: <b>{int(vref)}</b> &nbsp; "
+        if gdot: perf += f"Green Dot: <b>{int(gdot)}</b>"
+        perf += "</div>"
+    perf += "</div>"
+    st.markdown(perf, unsafe_allow_html=True)
+
+    st.caption("Note: Heuristic estimator for Infinite Flight only. Not for real-world flight operations.")
