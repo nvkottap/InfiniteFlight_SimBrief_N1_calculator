@@ -640,8 +640,8 @@ with col_right:
 
     # -------- Performance card (bottom) --------
     perf = f"""
-    <div style="margin-top:10px; padding:14px; border:1px solid #2a3542; border-radius:12px; background:#111824; color:#e9f0f6;">
-      <div style="font-size:1.08rem; font-weight:700; margin-bottom:6px;">Performance Summary</div>
+    <div style="margin-top:10px; padding:15px; border:2px solid #2a3542; border-radius:12px; background:#111824; color:#e9f0f6;">
+      <div style="font-size:1.10rem; font-weight:700; margin-bottom:6px;">Performance Summary</div>
       <div>Series: <b style="color:#fff;">{series.replace('_',' ').title()}</b> &nbsp;|&nbsp; Brand: <b style="color:#fff;">{brand.title()}</b> &nbsp;|&nbsp; Thrust: <b style="color:#fff;">{thrust_mode}</b></div>
       <div>SEL Temp: <b style="color:#fff;">{sel:.0f}°C</b> &nbsp;|&nbsp; OAT: <b style="color:#fff;">{oat:.0f}°C</b> &nbsp;|&nbsp; QNH: <b style="color:#fff;">{qnh:.2f} inHg</b> &nbsp;|&nbsp; Field Elev: <b style="color:#fff;">{elev:.0f} ft</b> &nbsp;|&nbsp; PA: <b style="color:#fff;">{pa_ft:.0f} ft</b></div>
     """
@@ -656,4 +656,4 @@ with col_right:
     perf += "</div>"
     st.markdown(perf, unsafe_allow_html=True)
 
-    st.caption("Note: Heuristic estimator for Infinite Flight only. Not for real-world flight operations.")
+
