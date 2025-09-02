@@ -586,25 +586,25 @@ if go:
                                 flaps_label=selected_flaps_label, tow_klb=tow_klb)
 
    # -------- Metrics strip (top) – high contrast, with PA; no Green Dot --------
-  v1  = data.get("V1")
-  vr  = data.get("VR")
-  v2  = data.get("V2")
-  vref = data.get("VREF")
+    v1  = data.get("V1")
+    vr  = data.get("VR")
+    v2  = data.get("V2")
+    vref = data.get("VREF")
 
-  metrics_html = f'''
-  <div class="info-bar">
-    <div class="info-kv"><span class="k">N1</span><span class="v">{n1:.1f}%</span></div>
-    <div class="info-kv"><span class="k">Flaps</span><span class="v">{selected_flaps_label}</span></div>
-    <div class="info-kv"><span class="k">Trim</span><span class="v">{trim_pct:.0f}%</span></div>
-    <div class="info-kv"><span class="k">PA</span><span class="v">{pa_disp_ft:.0f} ft</span></div>
-  '''
-  if v1  is not None: metrics_html += f'<div class="info-kv"><span class="k">V1</span><span class="v">{int(v1)}</span></div>'
-  if vr  is not None: metrics_html += f'<div class="info-kv"><span class="k">VR</span><span class="v">{int(vr)}</span></div>'
-  if v2  is not None: metrics_html += f'<div class="info-kv"><span class="k">V2</span><span class="v">{int(v2)}</span></div>'
-  if vref is not None: metrics_html += f'<div class="info-kv"><span class="k">VREF</span><span class="v">{int(vref)}</span></div>'
-  metrics_html += "</div>"
+    metrics_html = f'''
+    <div class="info-bar">
+      <div class="info-kv"><span class="k">N1</span><span class="v">{n1:.1f}%</span></div>
+      <div class="info-kv"><span class="k">Flaps</span><span class="v">{selected_flaps_label}</span></div>
+      <div class="info-kv"><span class="k">Trim</span><span class="v">{trim_pct:.0f}%</span></div>
+      <div class="info-kv"><span class="k">PA</span><span class="v">{pa_disp_ft:.0f} ft</span></div>
+    '''
+    if v1  is not None: metrics_html += f'<div class="info-kv"><span class="k">V1</span><span class="v">{int(v1)}</span></div>'
+    if vr  is not None: metrics_html += f'<div class="info-kv"><span class="k">VR</span><span class="v">{int(vr)}</span></div>'
+    if v2  is not None: metrics_html += f'<div class="info-kv"><span class="k">V2</span><span class="v">{int(v2)}</span></div>'
+    if vref is not None: metrics_html += f'<div class="info-kv"><span class="k">VREF</span><span class="v">{int(vref)}</span></div>'
+    metrics_html += "</div>"
 
-  st.markdown(metrics_html, unsafe_allow_html=True)
+    st.markdown(metrics_html, unsafe_allow_html=True)
 
 
     # -------- Diagram row --------
