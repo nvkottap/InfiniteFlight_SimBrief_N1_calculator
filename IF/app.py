@@ -399,52 +399,44 @@ def draw_trim_bar(trim_pct: float):
     return fig
 
 
-def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str):
+def draw_flap_detents_small(brand: str, series: str, selected_label: str):
     """
     Compact flap ladder:
-      • AIRBUS: 0 (top) → 1 → 1+F → 2 → 3 → FULL (bottom)
-      • BOEING: 0 (top) → ... → 40 (bottom)
-    Labels on the LEFT; highlight hugs ladder segment (no text overlap).
+      • Top = flaps up (0), bottom = full flaps
+      • Shows "Flaps [setting]" at the TOP of the ladder
+      • Labels left-aligned; highlight hugs ladder (no text overlap)
     """
+    detents = get_flap_detents(brand, series)
+    det_norm = [d.upper() for d in detents]
+    sel_norm = (selected_label or "").upper()
+
     fig, ax = plt.subplots(figsize=(2.2, 3.0))
-    bg = "#0a0f14"; white="#ffffff"; yellow="#ffd21f"
+    bg = "#0a0f14"; white = "#ffffff"; yellow = "#ffd21f"
     ax.set_facecolor(bg); fig.patch.set_facecolor(bg)
     for s in ax.spines.values(): s.set_visible(False)
     ax.get_xaxis().set_visible(False)
 
-    # Ensure correct set & order by brand
-    detents_draw = get_flap_detents(brand, series="unused")
-    # If the caller passed a specific list (from airframe), merge with canonical order:
-    if detents:
-        det_u = {d.upper(): d for d in detents}
-        detents_draw = [det_u.get(lbl, lbl) for lbl in detents_draw if lbl.upper() in det_u]
-
-    n = len(detents_draw)
-    ax.set_xlim(0,1)
-    # Invert Y so index 0 renders at TOP (0/top → FULL/bottom)
-    ax.set_ylim(n-0.5, -0.5)
+    n = len(detents)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(n - 0.5, -0.5)  # invert so 0 at top
 
     x_ladder = 0.62
-    ax.plot([x_ladder, x_ladder], [0, n-1], color=white, linewidth=2.0)
+    ax.plot([x_ladder, x_ladder], [0, n - 1], color=white, linewidth=2.0)
 
-    for i, lab in enumerate(detents_draw):
-        ax.plot([x_ladder-0.06, x_ladder+0.06], [i, i], color=white, linewidth=1.6)
-        ax.text(x_ladder-0.10, i, lab, va="center", ha="right", fontsize=10, color=white)
+    # ticks + labels
+    for i, lab in enumerate(detents):
+        ax.plot([x_ladder - 0.06, x_ladder + 0.06], [i, i], color=white, linewidth=1.6)
+        ax.text(x_ladder - 0.10, i, lab, va="center", ha="right", fontsize=10, color=white)
 
-    # Selection highlight: rectangle around the ladder segment only
-    if selected_label:
-        try:
-            # Match case-insensitively
-            idx = next(i for i, l in enumerate(detents_draw) if l.upper() == selected_label.upper())
-            ax.add_patch(plt.Rectangle((x_ladder-0.08, idx-0.35), 0.16, 0.7,
-                                       fill=False, edgecolor=yellow, linewidth=2.0))
-        except StopIteration:
-            pass
+    # selection box
+    if sel_norm in det_norm:
+        idx = det_norm.index(sel_norm)
+        ax.add_patch(plt.Rectangle((x_ladder - 0.08, idx - 0.35), 0.16, 0.7,
+                                   fill=False, edgecolor=yellow, linewidth=2.0))
 
-    ax.text(0.5, -0.15, "FLAPS", ha="center", va="top",
-            fontsize=10, color=white, fontweight="bold", transform=ax.transAxes)
-    ax.text(0.5, 1.08, f"{selected_label or ''}", ha="center", va="bottom",
-            fontsize=10, color=white, transform=ax.transAxes)
+    # title at the TOP with selected setting
+    ax.text(0.5, -0.10, f"Flaps {selected_label}", ha="center", va="bottom",
+            fontsize=11, color=white, fontweight="bold", transform=ax.transAxes)
 
     ax.set_yticks([])
     try:
