@@ -634,7 +634,6 @@ if go and txt.strip():
                 unsafe_allow_html=True
                 )
 
-            )
 
         with c2:
             st.caption("Flaps")
