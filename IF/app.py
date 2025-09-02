@@ -21,8 +21,8 @@ st.markdown("""
   background:#111824;
 }
 .info-kv { display:flex; gap:6px; align-items:baseline; }
-.info-kv .k { color:#a9c4db; font-size:15px; letter-spacing:0.2px; }
-.info-kv .v { color:#ffffff; font-weight:800; font-size:18px; }
+.info-kv .k { color:#a9c4db; font-size:18px; letter-spacing:0.2px; }
+.info-kv .v { color:#ffffff; font-weight:800; font-size:22px; }
 
 /* Reduce default Streamlit figure top/bottom spacing */
 .block-container { padding-top: 1.0rem; padding-bottom: 2.0rem; }
