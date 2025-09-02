@@ -532,13 +532,17 @@ if go and txt.strip():
         # Takeoff Thrust / Flaps
         st.markdown("<h3 style='margin-top:0.25rem;'>Takeoff Thrust / Flaps</h3>", unsafe_allow_html=True)
         c1, c2 = st.columns(2, gap="large")
-
+        
         with c1:
             st.caption("Engine N1")
             if brand == "airbus":
                 st.pyplot(draw_n1_dial_airbus(n1, conf), use_container_width=False)
             else:
                 st.pyplot(draw_n1_dial_boeing(n1, conf), use_container_width=False)
+            st.markdown(f"<div style='text-align:center; margin-top:-10px;'>"
+                f"<span style='font-weight:700;'>N1:</span> {n1:.1f}% "
+                f"<span style='opacity:0.7;'>(±{conf:.1f}%)</span>"
+                f"</div>", unsafe_allow_html=True)
 
         with c2:
             st.caption("Flaps")
