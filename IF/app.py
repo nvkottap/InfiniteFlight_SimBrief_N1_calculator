@@ -622,17 +622,18 @@ if go and txt.strip():
             # Print readout UNDER the dial so it never overlaps
             st.markdown(
                 f"""
-                 <div style='text-align:center; margin-top:-6px;'>
-                     <span style='font-size:1.6rem; font-weight:800; color:#00ff90;'>
-                        {n1:.1f}% N1
+                <div style='text-align:center; margin-top:-6px;'>
+                    <span style='font-size:1.6rem; font-weight:800; color:#000000;'>
+                        N1% = {n1:.1f}
                     </span><br>
-                    <span style='font-size:1.0rem; opacity:0.75;'>
+                    <span style='font-size:1.0rem; color:#000000; opacity:0.75;'>
                         ±{conf:.1f}%
                     </span>
                 </div>
                 """,
                 unsafe_allow_html=True
-                )
+            )
+
 
 
         with c2:
