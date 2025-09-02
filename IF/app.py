@@ -146,6 +146,116 @@ def draw_n1_gauge(n1: float, conf_pm: float):
     ax.set_xlabel("N1 (%)")
     ax.set_title(f"N1 target ≈ {n1:.1f}%  (±{conf_pm:.1f}%)", fontsize=18)  # bigger title
     return fig
+import math
+
+def draw_n1_dial(n1: float, conf_pm: float):
+    """
+    Compact MFD-style N1 dial: 70–110% arc with tick marks, green band, target bug, and ± band.
+    """
+    min_n1, max_n1 = 70, 110
+    # Map N1 to angle (in radians). We’ll draw a ~240° arc (from -210° to +30°).
+    start_deg, end_deg = -210, 30
+    span_deg = end_deg - start_deg
+
+    def n1_to_angle(v):
+        v = max(min(v, max_n1), min_n1)
+        frac = (v - min_n1) / (max_n1 - min_n1)
+        return math.radians(start_deg + frac * span_deg)
+
+    fig, ax = plt.subplots(figsize=(3.8, 3.8))  # small dial
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    # Dial geometry
+    R_outer = 1.0
+    R_inner = 0.75
+    center = (0, 0)
+
+    # Background arc (face)
+    theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 300)
+    x_outer = R_outer * np.cos(theta); y_outer = R_outer * np.sin(theta)
+    x_inner = R_inner * np.cos(theta[::-1]); y_inner = R_inner * np.sin(theta[::-1])
+    ax.fill(np.concatenate([x_outer, x_inner]),
+            np.concatenate([y_outer, y_inner]),
+            alpha=0.06)
+
+    # Green “normal thrust” band (80–102%)
+    green_lo, green_hi = 80, 102
+    t_band = np.linspace(n1_to_angle(green_lo), n1_to_angle(green_hi), 120)
+    xb_o = R_outer * np.cos(t_band); yb_o = R_outer * np.sin(t_band)
+    xb_i = R_inner * np.cos(t_band[::-1]); yb_i = R_inner * np.sin(t_band[::-1])
+    ax.fill(np.concatenate([xb_o, xb_i]),
+            np.concatenate([yb_o, yb_i]),
+            alpha=0.18)
+
+    # ± band around the target
+    band_lo, band_hi = n1 - conf_pm, n1 + conf_pm
+    t_pm = np.linspace(n1_to_angle(band_lo), n1_to_angle(band_hi), 80)
+    xp_o = R_outer * np.cos(t_pm); yp_o = R_outer * np.sin(t_pm)
+    xp_i = (R_outer - 0.05) * np.cos(t_pm[::-1]); yp_i = (R_outer - 0.05) * np.sin(t_pm[::-1])
+    ax.fill(np.concatenate([xp_o, xp_i]),
+            np.concatenate([yp_o, yp_i]),
+            alpha=0.15)
+
+    # Tick marks every 5%, labels every 10%
+    for val in range(70, 111, 5):
+        ang = n1_to_angle(val)
+        r1 = R_inner - 0.03 if val % 10 else R_inner - 0.06
+        x1, y1 = R_outer * np.cos(ang), R_outer * np.sin(ang)
+        x2, y2 = r1 * np.cos(ang), r1 * np.sin(ang)
+        ax.plot([x1, x2], [y1, y2], linewidth=2)
+
+        if val % 10 == 0:
+            # Label a bit inside
+            rl = r1 - 0.10
+            xl, yl = rl * np.cos(ang), rl * np.sin(ang)
+            ax.text(xl, yl, f"{val}", ha="center", va="center", fontsize=9)
+
+    # Target “bug” needle
+    ang_tgt = n1_to_angle(n1)
+    xh, yh = (R_inner - 0.18) * np.cos(ang_tgt), (R_inner - 0.18) * np.sin(ang_tgt)
+    ax.plot([0, xh], [0, yh], linewidth=3)
+    ax.add_artist(plt.Circle(center, 0.05))  # hub
+
+    # Readout
+    ax.text(0, -0.55, f"N1  {n1:.1f}%", ha="center", va="center", fontsize=14, fontweight="bold")
+    ax.text(0, -0.72, f"±{conf_pm:.1f}%", ha="center", va="center", fontsize=9)
+
+    return fig
+
+
+def draw_flap_schematic(flaps_value: int, airframe_hint: str = ""):
+    """
+    Simple wing planform with slats/flaps. Generic proportions; just for quick visual confirmation.
+    airframe_hint: string containing manufacturer keywords to adjust label style (e.g., “A321”, “B737”).
+    """
+    fig, ax = plt.subplots(figsize=(4.2, 2.6))
+    ax.axis("off")
+    ax.set_xlim(0, 10)
+    ax.set_ylim(0, 4)
+
+    # Wing body
+    ax.add_patch(plt.Rectangle((1, 2.0), 8, 0.4, linewidth=1.5, fill=False))
+
+    # Slats (leading edge) — deflection increases slightly with flaps
+    slat_defl = min(max(flaps_value, 0), 5) * 0.06
+    ax.add_patch(plt.Rectangle((1, 2.45), 8, 0.12, linewidth=1, fill=True, alpha=0.15))
+    ax.plot([1, 9], [2.57, 2.57 + slat_defl], linewidth=3)  # tiny “edge” line to imply movement
+
+    # Flaps (trailing edge)
+    flap_defl = min(max(flaps_value, 0), 25) * 0.02  # scale deflection by numeric “flaps”
+    # Draw 3 segments trailing edge with deflection angle effect
+    segments = [(1.5, 1.9, 2.8), (4.0, 1.9, 2.8), (6.5, 1.9, 2.8)]
+    for (sx, sy, w) in segments:
+        ax.add_patch(plt.Rectangle((sx, sy), w, 0.10, linewidth=1, fill=True, alpha=0.15))
+        ax.plot([sx, sx + w], [sy, sy - flap_defl], linewidth=3)
+
+    # Label
+    family = "Airbus" if "A3" in airframe_hint.upper() else ("Boeing" if "B7" in airframe_hint.upper() else "")
+    label = f"Flaps {flaps_value}" + (f" • {family}" if family else "")
+    ax.text(5, 0.35, label, ha="center", va="center", fontsize=11, fontweight="bold")
+
+    return fig
 
 def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
@@ -254,8 +364,19 @@ if go and txt.strip():
 
         # Bigger “Takeoff Thrust Target” section (gauge has larger title + figure size)
         st.markdown("<h3 style='margin-top:0.5rem;'>Takeoff Thrust Target</h3>", unsafe_allow_html=True)
-        fig_g = draw_n1_gauge(n1, conf)
-        st.pyplot(fig_g, use_container_width=True)
+        # OLD: fig_g = draw_n1_gauge(n1, conf)
+        # st.pyplot(fig_g, use_container_width=True)
+
+        # NEW: compact dial + flap schematic side-by-side
+        c_g1, c_g2 = st.columns([1, 1], gap="large")
+        with c_g1:
+            fig_dial = draw_n1_dial(n1, conf)
+            st.pyplot(fig_dial, use_container_width=False)
+        with c_g2:
+            airframe_hint = data.get("header", "")
+            fig_flaps = draw_flap_schematic(int(data.get("flaps") or 0), airframe_hint=airframe_hint)
+            st.pyplot(fig_flaps, use_container_width=False)
+
 
         # Performance Card
         st.subheader("Takeoff Performance Card")
