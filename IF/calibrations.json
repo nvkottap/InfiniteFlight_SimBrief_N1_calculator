@@ -1,156 +1,180 @@
 {
-  "version": "1.2.0",
+  "version": "1.3.0",
   "updated_utc": "2025-09-02T00:00:00Z",
   "engines": {
-    "leap-1b28": { "a": 95.5, "b_temp": -0.06, "c_pa": 0.28, "d_derate": -1.6, "w_ref": 160.0, "e_wt": 0.020 },
-    "ge90-94b": { "a": 96.8, "b_temp": -0.06, "c_pa": 0.26, "d_derate": -1.6, "w_ref": 460.0, "e_wt": 0.022 },
-    "trent-970-84": { "a": 97.5, "b_temp": -0.07, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 800.0, "e_wt": 0.014 },
-    "trent-xwb-84": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 590.0, "e_wt": 0.016 },
-    "cfm56-5b3": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 158.0, "e_wt": 0.022 },
-    "cfm56-5b4": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 148.0, "e_wt": 0.022 },
-    "pw2037": { "a": 95.5, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.6, "w_ref": 235.0, "e_wt": 0.022 },
-    "generic": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
+    "leap-1b28": { "a": 95.5, "b_temp": -0.06, "c_pa": 0.28, "d_derate": -1.6, "w_ref": 160.0, "e_wt": 0.045 },
+    "ge90-94b":  { "a": 96.8, "b_temp": -0.06, "c_pa": 0.26, "d_derate": -1.6, "w_ref": 460.0, "e_wt": 0.040 },
+    "trent-970-84": { "a": 97.5, "b_temp": -0.07, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 800.0, "e_wt": 0.032 },
+    "trent-xwb-84": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.2, "w_ref": 590.0, "e_wt": 0.034 },
+    "cfm56-5b3": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 158.0, "e_wt": 0.042 },
+    "cfm56-5b4": { "a": 94.2, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.3, "w_ref": 148.0, "e_wt": 0.042 },
+    "pw2037":    { "a": 95.5, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.6, "w_ref": 235.0, "e_wt": 0.040 },
+    "generic":   { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.038 }
   },
   "airframes": {
     "boeing_737_max8": {
       "engine_id": "leap-1b28",
       "brand": "boeing",
-      "detents": ["0", "1", "2", "5", "10", "15", "25", "30", "40"],
+      "mtow_klb": 181.0,
+      "detents": ["0","1","2","5","10","15","25","30","40"],
       "baseline_trim": 10.0,
       "baseline_flaps": 5,
       "cg_ref": 24.0,
       "n1_overrides": [
-        { "flaps_label": "1", "weight_frac": 0.50, "n1_target": 90.0 },
-        { "flaps_label": "5", "weight_frac": 0.50, "n1_target": 88.0 },
-        { "flaps_label": "5", "weight_frac": 0.85, "n1_target": 93.5 }
+        { "flaps_label": "1", "weight_frac": 0.35, "n1_target": 88.5 },
+        { "flaps_label": "5", "weight_frac": 0.35, "n1_target": 87.0 },
+        { "flaps_label": "5", "weight_frac": 0.50, "n1_target": 88.5 },
+        { "flaps_label": "5", "weight_frac": 0.80, "n1_target": 93.0 },
+        { "flaps_label": "5", "weight_frac": 0.95, "n1_target": 95.0 }
       ],
       "trim_overrides": [
+        { "flaps_label": "5", "weight_frac": 0.35, "if_trim_pct": 11.0 },
         { "flaps_label": "5", "weight_frac": 0.50, "if_trim_pct": 12.0 },
         { "flaps_label": "5", "weight_frac": 0.85, "if_trim_pct": 16.0 }
       ]
     },
+
     "airbus_a380": {
       "engine_id": "trent-970-84",
       "brand": "airbus",
-      "detents": ["0", "1", "1+F", "2", "3", "FULL"],
+      "mtow_klb": 1268.0,
+      "detents": ["0","1","1+F","2","3","FULL"],
       "baseline_trim": 28.0,
       "baseline_flaps": 1,
       "cg_ref": 25.0,
       "n1_overrides": [
         { "flaps_label": "1+F", "weight_frac": 0.50, "n1_target": 92.0 },
-        { "flaps_label": "2", "weight_frac": 0.78, "n1_target": 90.0 }
+        { "flaps_label": "2",   "weight_frac": 0.78, "n1_target": 90.0 },
+        { "flaps_label": "2",   "weight_frac": 0.90, "n1_target": 92.5 }
       ],
       "trim_overrides": [
         { "flaps_label": "1+F", "weight_frac": 0.50, "if_trim_pct": 30.0 },
-        { "flaps_label": "2", "weight_frac": 0.78, "if_trim_pct": 26.0 }
+        { "flaps_label": "2",   "weight_frac": 0.78, "if_trim_pct": 26.0 }
       ]
     },
+
     "boeing_777": {
       "engine_id": "ge90-94b",
       "brand": "boeing",
+      "mtow_klb": 660.0,
       "detents": ["0","5","15","20","25","30"],
       "baseline_trim": 8.0,
       "baseline_flaps": 5,
       "cg_ref": 28.0,
       "n1_overrides": [
-        { "flaps_label": "5", "weight_frac": 0.25, "n1_target": 86.0 },
-        { "flaps_label": "5", "weight_frac": 0.50, "n1_target": 89.0 },
-        { "flaps_label": "5", "weight_frac": 0.75, "n1_target": 92.0 },
-        { "flaps_label": "15", "weight_frac": 0.85, "n1_target": 95.0 }
+        { "flaps_label": "5",  "weight_frac": 0.25, "n1_target": 86.0 },
+        { "flaps_label": "5",  "weight_frac": 0.50, "n1_target": 89.0 },
+        { "flaps_label": "5",  "weight_frac": 0.75, "n1_target": 92.0 },
+        { "flaps_label": "15", "weight_frac": 0.85, "n1_target": 95.0 },
+        { "flaps_label": "15", "weight_frac": 0.95, "n1_target": 96.5 }
       ],
       "trim_overrides": [
-        { "flaps_label": "5", "weight_frac": 0.25, "if_trim_pct": 12.0 },
-        { "flaps_label": "5", "weight_frac": 0.50, "if_trim_pct": 15.0 },
-        { "flaps_label": "5", "weight_frac": 0.75, "if_trim_pct": 18.0 },
+        { "flaps_label": "5",  "weight_frac": 0.25, "if_trim_pct": 12.0 },
+        { "flaps_label": "5",  "weight_frac": 0.50, "if_trim_pct": 15.0 },
+        { "flaps_label": "5",  "weight_frac": 0.75, "if_trim_pct": 18.0 },
         { "flaps_label": "15", "weight_frac": 0.85, "if_trim_pct": 20.0 }
       ]
     },
+
     "airbus_a350": {
       "engine_id": "trent-xwb-84",
       "brand": "airbus",
+      "mtow_klb": 617.0,
       "detents": ["0","1","1+F","2","3","FULL"],
       "baseline_trim": 9.0,
       "baseline_flaps": 2,
       "cg_ref": 25.0,
       "n1_overrides": [
-        { "flaps_label": "2", "weight_frac": 0.25, "n1_target": 88.0 },
-        { "flaps_label": "2", "weight_frac": 0.50, "n1_target": 89.0 },
-        { "flaps_label": "2", "weight_frac": 0.75, "n1_target": 91.0 },
-        { "flaps_label": "2", "weight_frac": 0.85, "n1_target": 92.0 },
-        { "flaps_label": "1+F", "weight_frac": 0.75, "n1_target": 89.0 }
+        { "flaps_label": "1+F", "weight_frac": 0.55, "n1_target": 89.0 },
+        { "flaps_label": "2",   "weight_frac": 0.25, "n1_target": 88.0 },
+        { "flaps_label": "2",   "weight_frac": 0.50, "n1_target": 89.0 },
+        { "flaps_label": "2",   "weight_frac": 0.75, "n1_target": 91.0 },
+        { "flaps_label": "2",   "weight_frac": 0.90, "n1_target": 93.0 }
       ],
       "trim_overrides": [
         { "flaps_label": "1+F", "weight_frac": 0.75, "if_trim_pct": 12.0 },
-        { "flaps_label": "2", "weight_frac": 0.85, "if_trim_pct": 16.0 }
+        { "flaps_label": "2",   "weight_frac": 0.85, "if_trim_pct": 16.0 }
       ]
     },
+
     "boeing_757": {
       "engine_id": "pw2037",
       "brand": "boeing",
+      "mtow_klb": 255.0,
       "detents": ["0","1","5","15","20","25","30"],
       "baseline_trim": 9.0,
       "baseline_flaps": 5,
       "cg_ref": 24.0,
       "n1_overrides": [
-        { "flaps_label": "5", "weight_frac": 0.25, "n1_target": 84.0 },
-        { "flaps_label": "5", "weight_frac": 0.50, "n1_target": 90.0 },
-        { "flaps_label": "5", "weight_frac": 0.75, "n1_target": 95.0 },
-        { "flaps_label": "15", "weight_frac": 0.85, "n1_target": 97.0 }
+        { "flaps_label": "5",  "weight_frac": 0.25, "n1_target": 84.0 },
+        { "flaps_label": "5",  "weight_frac": 0.50, "n1_target": 90.0 },
+        { "flaps_label": "5",  "weight_frac": 0.75, "n1_target": 95.0 },
+        { "flaps_label": "15", "weight_frac": 0.90, "n1_target": 97.0 }
       ],
       "trim_overrides": [
-        { "flaps_label": "5", "weight_frac": 0.25, "if_trim_pct": 8.0 },
-        { "flaps_label": "5", "weight_frac": 0.50, "if_trim_pct": 12.0 },
-        { "flaps_label": "5", "weight_frac": 0.75, "if_trim_pct": 15.0 },
+        { "flaps_label": "5",  "weight_frac": 0.25, "if_trim_pct": 8.0 },
+        { "flaps_label": "5",  "weight_frac": 0.50, "if_trim_pct": 12.0 },
+        { "flaps_label": "5",  "weight_frac": 0.75, "if_trim_pct": 15.0 },
         { "flaps_label": "15", "weight_frac": 0.85, "if_trim_pct": 18.0 }
       ]
     },
+
     "airbus_a330": {
       "engine_id": "generic",
       "brand": "airbus",
+      "mtow_klb": 507.0,
       "detents": ["0","1","1+F","2","3","FULL"],
       "baseline_trim": 9.0,
       "baseline_flaps": 2,
       "cg_ref": 25.0,
       "n1_overrides": [
         { "flaps_label": "1+F", "weight_frac": 0.25, "n1_target": 89.0 },
-        { "flaps_label": "2", "weight_frac": 0.50, "n1_target": 91.0 },
-        { "flaps_label": "2", "weight_frac": 0.75, "n1_target": 94.0 },
-        { "flaps_label": "2", "weight_frac": 0.85, "n1_target": 97.0 }
+        { "flaps_label": "2",   "weight_frac": 0.50, "n1_target": 91.0 },
+        { "flaps_label": "2",   "weight_frac": 0.75, "n1_target": 94.0 },
+        { "flaps_label": "2",   "weight_frac": 0.90, "n1_target": 97.0 }
       ],
       "trim_overrides": [
         { "flaps_label": "1+F", "weight_frac": 0.25, "if_trim_pct": 10.0 },
-        { "flaps_label": "2", "weight_frac": 0.50, "if_trim_pct": 13.0 },
-        { "flaps_label": "2", "weight_frac": 0.75, "if_trim_pct": 16.0 },
-        { "flaps_label": "2", "weight_frac": 0.85, "if_trim_pct": 18.0 }
+        { "flaps_label": "2",   "weight_frac": 0.50, "if_trim_pct": 13.0 },
+        { "flaps_label": "2",   "weight_frac": 0.75, "if_trim_pct": 16.0 },
+        { "flaps_label": "2",   "weight_frac": 0.85, "if_trim_pct": 18.0 }
       ]
     },
+
     "airbus_a320": {
       "engine_id": "cfm56-5b4",
       "brand": "airbus",
+      "mtow_klb": 170.0,
       "detents": ["0","1","1+F","2","3","FULL"],
       "baseline_trim": 8.0,
       "baseline_flaps": 1,
       "cg_ref": 25.0
     },
+
     "airbus_a321": {
       "engine_id": "cfm56-5b3",
       "brand": "airbus",
+      "mtow_klb": 206.0,
       "detents": ["0","1","1+F","2","3","FULL"],
       "baseline_trim": 9.0,
       "baseline_flaps": 1,
       "cg_ref": 25.0
     },
+
     "boeing_787": {
       "engine_id": "generic",
       "brand": "boeing",
+      "mtow_klb": 560.0,
       "detents": ["0","5","10","15","17","18","20","25","30"],
       "baseline_trim": 8.0,
       "baseline_flaps": 5,
       "cg_ref": 28.0
     },
+
     "generic": {
       "engine_id": "generic",
       "brand": "boeing",
+      "mtow_klb": 300.0,
       "detents": ["0","5","15","25","30"],
       "baseline_trim": 8.0,
       "baseline_flaps": 5,
