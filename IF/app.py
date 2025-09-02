@@ -1,6 +1,9 @@
 # app.py
 # Infinite Flight – Takeoff N1% Estimator (Sim-use only)
-# Final build (with Airbus/Boeing dials + unified vertical flaps detent guide, forced 1+F on Airbus)
+# Updates:
+#  - Removed heuristic mini-graph on Performance Card
+#  - N1 readout positioned BELOW dial (no overlap)
+#  - Flaps diagram shows "Flap setting: X" and forces Airbus 1+F when FLAPS=1
 
 import re
 import json
@@ -16,7 +19,7 @@ import seaborn as sns
 # --------------------------
 # Global style (seaborn)
 # --------------------------
-sns.set_theme(style="whitegrid", context="talk")  # clean visuals
+sns.set_theme(style="whitegrid", context="talk")
 
 # --------------------------
 # Engine calibration (heuristic; sim-use only)
@@ -87,7 +90,7 @@ def detect_brand(text: str) -> str:
     return "boeing"
 
 # --------------------------
-# Parsing & physics helpers
+# Parsing & helpers
 # --------------------------
 def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
     for token, eng_id in ENGINE_ALIASES.items():
@@ -168,14 +171,14 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     if bleeds_on:   n1 += 0.2
     if anti_ice_on: n1 += 0.5
 
-    # Confidence: grows slightly with PA and derate
     conf_pm = 0.4 + 0.05*pa_kft + 0.1*derate_steps
     return {"n1": n1, "conf_pm": conf_pm, "pa_ft": pa_ft}
 
 # --------------------------
-# N1 Dials (Boeing / Airbus)
+# N1 Dials (readout BELOW dial)
 # --------------------------
 def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
+    import numpy as np
     # Geometry
     min_n1, max_n1 = 0, 110
     start_deg, end_deg = -210, 30
@@ -186,7 +189,7 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
         frac = (v - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * span_deg)
 
-    # Colors (Boeing glass)
+    # Colors
     bg     = "#0a0f14"
     bezel  = (1,1,1,0.05)
     tick   = "#e8edf6"
@@ -200,8 +203,6 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
     R_outer, R_inner = 1.00, 0.74
-
-    # Bezel
     theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
     x_o, y_o = R_outer*np.cos(theta), R_outer*np.sin(theta)
     x_i, y_i = R_inner*np.cos(theta[::-1]), R_inner*np.sin(theta[::-1])
@@ -212,7 +213,7 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
     t_band = np.linspace(n1_to_angle(g0), n1_to_angle(g1), 120)
     xb_o, yb_o = R_outer*np.cos(t_band), R_outer*np.sin(t_band)
     xb_i, yb_i = R_inner*np.cos(t_band[::-1]), R_inner*np.sin(t_band[::-1])
-    ax.fill(np.r_[xb_o, xb_i], np.r_[yb_o, yb_i], color=(60/255, 204/255, 140/255, 0.22))
+    ax.fill(np.r_[xb_o, xb_i], np.r_[yb_o, yb_i], color=(60/255,204/255,140/255,0.22))
 
     # Confidence band
     lo, hi = n1 - conf_pm, n1 + conf_pm
@@ -221,7 +222,7 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
     xp_i, yp_i = (R_outer-0.06)*np.cos(t_pm[::-1]), (R_outer-0.06)*np.sin(t_pm[::-1])
     ax.fill(np.r_[xp_o, xp_i], np.r_[yp_o, yp_i], color=band)
 
-    # Ticks and labels
+    # Ticks & labels
     for val in range(0, 111, 5):
         ang = n1_to_angle(val)
         major = (val % 10 == 0)
@@ -240,16 +241,17 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float, show_title=False):
     ax.plot([0, xh], [0, yh], color=bug, linewidth=3)
     ax.add_artist(plt.Circle((0,0), 0.05, color=label))
 
-    # Readouts
-    ax.text(0, -0.53, f"N1  {n1:.1f}%", ha="center", va="center",
+    # Readouts BELOW dial
+    ax.text(0, -0.92, f"N1  {n1:.1f}%", ha="center", va="center",
             fontsize=12, fontweight="bold", color=normal)
-    ax.text(0, -0.71, f"±{conf_pm:.1f}%", ha="center", va="center",
+    ax.text(0, -1.08, f"±{conf_pm:.1f}%", ha="center", va="center",
             fontsize=8.5, color=label)
     if show_title:
         ax.text(0, 1.15, "ENGINE N1", ha="center", va="center", fontsize=10, color=label)
     return fig
 
 def draw_n1_dial_airbus(n1: float, conf_pm: float):
+    import numpy as np
     # Geometry
     min_n1, max_n1 = 0, 110
     start_deg, end_deg = -210, 30
@@ -274,7 +276,6 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
     R_outer, R_inner = 1.00, 0.74
-
     theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
     x_o, y_o = R_outer*np.cos(theta), R_outer*np.sin(theta)
     x_i, y_i = R_inner*np.cos(theta[::-1]), R_inner*np.sin(theta[::-1])
@@ -294,7 +295,7 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
     xb_i, yb_i = R_inner*np.cos(t_band[::-1]), R_inner*np.sin(t_band[::-1])
     ax.fill(np.r_[xb_o, xb_i], np.r_[yb_o, yb_i], color=(0,1,0.55,0.20))
 
-    # Ticks/labels
+    # Ticks & labels
     for val in range(0, 111, 5):
         ang = n1_to_angle(val)
         major = (val % 10 == 0)
@@ -313,20 +314,17 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
     ax.plot([0, xh], [0, yh], color=bug, linewidth=2.5)
     ax.add_artist(plt.Circle((0,0), 0.05, color=label))
 
-    # Readouts
-    ax.text(0, -0.53, f"N1  {n1:.1f}%", ha="center", va="center",
+    # Readouts BELOW dial
+    ax.text(0, -0.92, f"N1  {n1:.1f}%", ha="center", va="center",
             fontsize=12, fontweight="bold", color=normal)
-    ax.text(0, -0.71, f"±{conf_pm:.1f}%", ha="center", va="center",
+    ax.text(0, -1.08, f"±{conf_pm:.1f}%", ha="center", va="center",
             fontsize=8.5, color=label)
     return fig
 
 # --------------------------
 # Unified vertical flaps detent guide (brand & airframe aware)
 # --------------------------
-# Airbus ECAM vertical: 0, 1, 1+F, 2, 3, FULL
 AIRBUS_DETENTS = ["0", "1", "1+F", "2", "3", "FULL"]
-
-# Boeing families (typical)
 BOEING_DETENTS_DEFAULT = ["0", "1", "2", "5", "10", "15", "25", "30", "40"]
 BOEING_FAMILY_DETENTS = {
     "737": ["0", "1", "2", "5", "10", "15", "25", "30", "40"],
@@ -366,7 +364,7 @@ def nearest_label_by_value(detents: list[str], value: int) -> Optional[str]:
 def choose_selected_label(detents: list[str], numeric_flaps: Optional[int], brand: str) -> Optional[str]:
     if numeric_flaps is None:
         return None
-    # --- Airbus: FORCE "1+F" when flaps == 1 ---
+    # Airbus: FORCE "1+F" when flaps == 1
     if brand == "airbus":
         if numeric_flaps >= 4:
             return "FULL" if "FULL" in detents else detents[-1]
@@ -375,33 +373,26 @@ def choose_selected_label(detents: list[str], numeric_flaps: Optional[int], bran
         if numeric_flaps == 2 and "2" in detents:
             return "2"
         if numeric_flaps == 1:
-            # Force 1+F if present; otherwise use "1"
             return "1+F" if "1+F" in detents else ("1" if "1" in detents else detents[1])
-        # numeric_flaps == 0
         return "0" if "0" in detents else detents[0]
-
-    # --- Boeing: select nearest numeric detent label ---
+    # Boeing: nearest numeric detent
     return nearest_label_by_value(detents, numeric_flaps)
 
-def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None, title: str = "Flaps Detent Guide"):
+def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None):
     """
-    Vertical 'bar-like' detent guide with tick labels.
-    - detents: ordered top->bottom list of labels (strings)
-    - selected_label: one of the detents (case-insensitive), highlighted in green
+    Vertical detent guide with 'Flap setting: <value>' header.
     """
-    # Styling (neutral dark)
     bg     = "#0a0f14"
     lane   = (1,1,1,0.05)
     tick   = "#e8edf6"
     label  = "#e8edf6"
     highlight = "#3ccc8c"
 
-    fig, ax = plt.subplots(figsize=(3.0, 4.6))  # tall & slim
+    fig, ax = plt.subplots(figsize=(3.0, 4.6))
     ax.axis("off")
     fig.patch.set_facecolor(bg)
     ax.set_facecolor(bg)
 
-    # Layout
     top_margin = 0.90
     bottom_margin = 0.10
     x_lane = 0.35
@@ -410,7 +401,9 @@ def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = N
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
 
-    ax.text(0.5, 0.965, title, ha="center", va="center", fontsize=11, color=label, fontweight="bold")
+    header_val = (selected_label or "-")
+    ax.text(0.5, 0.965, f"Flap setting: {header_val}", ha="center", va="center",
+            fontsize=11, color=label, fontweight="bold")
 
     ax.add_patch(plt.Rectangle((x_lane - lane_w/2, bottom_margin),
                                lane_w, top_margin - bottom_margin,
@@ -423,30 +416,26 @@ def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = N
     sel_norm = (selected_label or "").strip().upper()
 
     for i, lab in enumerate(detents):
-        frac = 1.0 - (i / (n - 1)) if n > 1 else 0.5  # top=1, bottom=0
+        frac = 1.0 - (i / (n - 1)) if n > 1 else 0.5
         y = bottom_margin + frac * (top_margin - bottom_margin)
 
-        # tick
         ax.plot([x_lane - lane_w*0.55, x_lane + lane_w*0.55], [y, y], color=tick, linewidth=2)
-
-        # label
         ax.text(x_lane + lane_w*0.8, y, lab, ha="left", va="center", fontsize=10, color=label)
 
-        # highlight
         if lab.strip().upper() == sel_norm and sel_norm:
             ax.add_patch(plt.Rectangle((x_lane - lane_w*0.6, y - 0.028),
                                        lane_w*1.2, 0.056,
                                        facecolor=(60/255,204/255,140/255,0.25), edgecolor=None))
             ax.plot([x_lane - lane_w*0.7, x_lane - lane_w*0.6],
-                    [y, y], color=highlight, linewidth=4)  # little green pointer
+                    [y, y], color=highlight, linewidth=4)
 
     return fig
 
 # --------------------------
-# Performance Card
+# Performance Card (no mini-graph)
 # --------------------------
 def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
-    fig, ax = plt.subplots(figsize=(8.8, 4.8))
+    fig, ax = plt.subplots(figsize=(8.8, 4.2))  # slightly shorter
     ax.axis("off")
     title = (meta.get("header") or "TAKEOFF PERFORMANCE").strip()
     ax.text(0.02, 0.92, title, fontsize=13, fontweight="bold")
@@ -479,14 +468,6 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
     ax.text(0.72, 0.82, "N1 Target", fontsize=10, fontweight="bold")
     ax.text(0.72, 0.76, f'{result["n1"]:.1f}% ±{result["conf_pm"]:.1f}%', fontsize=16)
 
-    g_left, g_bottom, g_width, g_height = 0.68, 0.18, 0.28, 0.16
-    ax_in = fig.add_axes([g_left, g_bottom, g_width, g_height])
-    ax_in.set_xlim(80, 102); ax_in.set_ylim(0, 1)
-    ax_in.axvspan(max(80, result["n1"]-result["conf_pm"]), min(102, result["n1"]+result["conf_pm"]), alpha=0.15)
-    ax_in.axvline(result["n1"], linewidth=3)
-    ax_in.set_yticks([]); ax_in.set_xlabel("N1 (%)", fontsize=8)
-
-    ax.text(0.02, 0.05, "Simulation aid only • Heuristic estimate", fontsize=8)
     return fig
 
 # --------------------------
@@ -494,7 +475,6 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
 # --------------------------
 st.set_page_config(page_title="IF Takeoff N1 Estimator", page_icon="🛫", layout="wide")
 
-# Larger main title
 st.markdown("<h1 style='font-size:2.1rem; margin-bottom:0;'>🛫 Infinite Flight – Takeoff N1% Estimator</h1>", unsafe_allow_html=True)
 st.caption("Paste your TAKEOFF PERFORMANCE text → estimate N1% with brand-matched gauges and a Takeoff Performance Card. **Sim-use only; not for real-world operations.**")
 
@@ -540,30 +520,31 @@ if go and txt.strip():
             if data["v1"] and data["vr"] and data["v2"]:
                 st.metric("V1 / VR / V2", f'{data["v1"]} / {data["vr"]} / {data["v2"]}')
 
-        # Takeoff Thrust + Flaps (brand-aware)
+        # Takeoff Thrust + Flaps
         st.markdown("<h3 style='margin-top:0.25rem;'>Takeoff Thrust / Flaps</h3>", unsafe_allow_html=True)
         c1, c2 = st.columns(2, gap="large")
+
         with c1:
             st.caption("Engine N1")
             if brand == "airbus":
                 st.pyplot(draw_n1_dial_airbus(n1, conf), use_container_width=False)
             else:
                 st.pyplot(draw_n1_dial_boeing(n1, conf), use_container_width=False)
+
         with c2:
-            st.caption("Flaps (Detent Guide)")
+            st.caption("Flaps")
             detents = get_flap_detents(brand, data.get("header",""))
             flv = int(data.get("flaps") or 0)
-            selected = choose_selected_label(detents, flv, brand)  # forces 1+F for Airbus @ flaps=1
-            fig_flaps = draw_flap_detent_guide(detents, selected_label=selected,
-                                               title="Airbus Detents" if brand=="airbus" else "Boeing Detents")
+            selected = choose_selected_label(detents, flv, brand)  # Airbus forces 1+F when flaps=1
+            fig_flaps = draw_flap_detent_guide(detents, selected_label=selected)
             st.pyplot(fig_flaps, use_container_width=False)
 
-        # Performance card
+        # Performance card (no mini-graph)
         st.subheader("Takeoff Performance Card")
         fig_card = draw_perf_card(data, res)
         st.pyplot(fig_card, use_container_width=True)
 
-        # Sensitivity (smaller side-by-side)
+        # Sensitivity (unchanged; still helpful for sim users)
         st.subheader("Sensitivity")
         c_s1, c_s2 = st.columns(2, gap="large")
 
