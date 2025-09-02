@@ -453,13 +453,13 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
         frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * (end_deg - start_deg))
 
-    # Boeing-style palette
+    # Colors
     bg = "#0a0f14"
     bezel = (1, 1, 1, 0.06)
     tick = "#e8edf6"
     label = "#e8edf6"
     band = (1, 1, 1, 0.14)
-    txt_color = "#e8edf6"  # WHITE(ish)
+    txt_color = "#ffffff"
 
     fig, ax = plt.subplots(figsize=(3.2, 3.2))
     ax.set_aspect("equal"); ax.axis("off")
@@ -472,17 +472,17 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
             np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
             color=bezel)
 
-    # Normal band 80–102
-    t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
-    ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
-            np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
-            color=(60/255, 204/255, 140/255, 0.20))
-
     # Confidence arc
     t_pm = np.linspace(n1_to_angle(n1 - conf_pm), n1_to_angle(n1 + conf_pm), 80)
     ax.fill(np.r_[R_outer*np.cos(t_pm), (R_outer-0.06)*np.cos(t_pm[::-1])],
             np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
             color=band)
+
+    # Normal band 80–102
+    t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
+    ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
+            np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
+            color=(60/255, 204/255, 140/255, 0.20))
 
     # Ticks & numerals
     for val in range(0, 111, 5):
@@ -495,14 +495,15 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
                     ha="center", va="center", fontsize=9, color=label)
 
-    # --- Centered stacked white text (no pointer, no center disc) ---
-    ax.text(0, 0.06, f"N1% = {n1:.1f}%", ha="center", va="center",
-            fontsize=12, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.08, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=9, color=txt_color, alpha=0.9, zorder=6)
+    # --- Centered three-line white text ---
+    ax.text(0, 0.08, "N1%", ha="center", va="center",
+            fontsize=11, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.02, f"{n1:.1f}%", ha="center", va="center",
+            fontsize=13, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=10, color=txt_color, alpha=0.9, zorder=6)
 
     return fig
-
 
 def draw_n1_dial_airbus(n1: float, conf_pm: float):
     import numpy as np
@@ -528,7 +529,7 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
 
     R_outer, R_inner = 1.00, 0.74
     theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
-    # Bezel
+    # Bezel ring
     ax.fill(np.r_[R_outer*np.cos(theta), R_inner*np.cos(theta[::-1])],
             np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
             color=bezel)
@@ -543,27 +544,28 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
     t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
     ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
             np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
-            color=(0, 1, 0.55, 0.20))
+            color=(60/255, 204/255, 140/255, 0.20))
 
     # Ticks & numerals
     for val in range(0, 111, 5):
         ang = n1_to_angle(val); major = (val % 10 == 0)
-        r2 = 0.74 - (0.06 if major else 0.03)
-        ax.plot([1.00*np.cos(ang), r2*np.cos(ang)],
-                [1.00*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
+        r2 = R_inner - (0.06 if major else 0.03)
+        ax.plot([R_outer*np.cos(ang), r2*np.cos(ang)],
+                [R_outer*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
         if major and 0 < val < 110:
             rl = r2 - 0.10
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
                     ha="center", va="center", fontsize=9, color=label)
 
-    # --- Centered stacked white text (no pointer, no center disc) ---
-    ax.text(0, 0.06, f"N1% = {n1:.1f}%", ha="center", va="center",
-            fontsize=12, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.08, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=9, color=txt_color, alpha=0.9, zorder=6)
+    # --- Centered three-line white text ---
+    ax.text(0, 0.08, "N1%", ha="center", va="center",
+            fontsize=11, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.02, f"{n1:.1f}%", ha="center", va="center",
+            fontsize=13, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=10, color=txt_color, alpha=0.9, zorder=6)
 
     return fig
-
 
 def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None):
     bg, lane, tick, label = "#0a0f14", (1,1,1,0.05), "#e8edf6", "#e8edf6"
