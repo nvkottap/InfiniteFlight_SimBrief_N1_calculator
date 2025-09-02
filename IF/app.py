@@ -443,68 +443,116 @@ def estimate_if_trim(data: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------
 # Dials (numeric readout is printed below via Streamlit)
 # --------------------------
-def draw_n1_dial_boeing(n1: float, conf_pm: float):
+def draw_n1_dial_boeing(n1_percent: float, conf_pm: float):
+    """
+    Boeing-style N1 dial:
+    - 0 at 3 o'clock, increases clockwise to 10.5 o'clock (0..10 scale)
+    - Internal ticks, labels at 0,2,4,6,8,10
+    - Red tick at max (end of bezel)
+    - Digital N1 in a box above the 0 position, shown as 0.0..10.0 (100% => 10.0)
+    - No pointer/needle
+    """
     import numpy as np
-    min_n1, max_n1 = 0, 110
-    # Flip orientation: 0% on right (−90°), 100% on left (−270°)
-    start_deg, end_deg = -90, -270  
+    import matplotlib.patches as patches
 
-    def clamp(v, lo, hi): return max(min(v, hi), lo)
-    def n1_to_angle(v):
-        frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
-        return math.radians(start_deg + frac * (end_deg - start_deg))
+    # Map percent (0..110) to 0..10 scale for display
+    n1_scaled = max(0.0, min(10.0, (n1_percent / 100.0) * 10.0))
+
+    # Geometry: start at 3 o'clock (0°), go CW to ~10:30 (−225°)
+    start_deg = 0
+    end_deg = -225
+    to_rad = np.deg2rad
 
     # Colors
     bg = "#0a0f14"
-    bezel = (1, 1, 1, 0.06)
+    bezel = (1, 1, 1, 0.07)
     tick = "#e8edf6"
     label = "#e8edf6"
-    band = (1, 1, 1, 0.14)
-    txt_color = "#ffffff"
+    normal_band = (60/255, 204/255, 140/255, 0.20)  # subtle green
+    conf_band = (1, 1, 1, 0.14)
+    red_tick = "#d84b4b"
+    box_line = "#e8edf6"
+    box_text = "#ffffff"
 
-    fig, ax = plt.subplots(figsize=(3.2, 3.2))
+    fig, ax = plt.subplots(figsize=(3.4, 3.4))
     ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
-    R_outer, R_inner = 1.00, 0.74
-    theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
-    # Bezel ring
-    ax.fill(np.r_[R_outer*np.cos(theta), R_inner*np.cos(theta[::-1])],
-            np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
-            color=bezel)
+    # Radii
+    R_outer, R_inner = 1.00, 0.76
+    R_tick_inner_major = R_inner - 0.07
+    R_tick_inner_minor = R_inner - 0.035
 
-    # Confidence arc
-    t_pm = np.linspace(n1_to_angle(n1 - conf_pm), n1_to_angle(n1 + conf_pm), 80)
-    ax.fill(np.r_[R_outer*np.cos(t_pm), (R_outer-0.06)*np.cos(t_pm[::-1])],
-            np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
-            color=band)
+    # Draw bezel ring (donut segment)
+    theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 320)
+    ax.fill(
+        np.r_[R_outer*np.cos(theta), R_inner*np.cos(theta[::-1])],
+        np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
+        color=bezel, zorder=1
+    )
 
-    # Normal band 80–102
-    t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
-    ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
-            np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
-            color=(60/255, 204/255, 140/255, 0.20))
+    # Normal band (80–102% → 8.0..10.2)
+    def scale_to_angle(val_0_10):
+        frac = (val_0_10 - 0.0) / 10.0
+        return to_rad(start_deg + frac * (end_deg - start_deg))
+    band_lo = max(0.0, 8.0)
+    band_hi = min(10.0, 10.2)
+    t_norm = np.linspace(scale_to_angle(band_lo), scale_to_angle(band_hi), 100)
+    ax.fill(
+        np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
+        np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
+        color=normal_band, zorder=2
+    )
 
-    # Ticks & numerals
-    for val in range(0, 111, 10):
-        ang = n1_to_angle(val)
-        r2 = R_inner - 0.06
-        ax.plot([R_outer*np.cos(ang), r2*np.cos(ang)],
-                [R_outer*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
-        if 0 < val < 110:
+    # Confidence arc around current value (drawn on outer lip, subtle)
+    t_pm = np.linspace(scale_to_angle(max(0.0, n1_scaled - (conf_pm/10.0))),
+                       scale_to_angle(min(10.0, n1_scaled + (conf_pm/10.0))), 80)
+    ax.fill(
+        np.r_[R_outer*np.cos(t_pm), (R_outer-0.06)*np.cos(t_pm[::-1])],
+        np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
+        color=conf_band, zorder=3
+    )
+
+    # Internal ticks (every 1; label even 0,2,4,6,8,10)
+    for v in np.arange(0, 10.0001, 1.0):
+        ang = scale_to_angle(v)
+        is_major = (int(v) % 2 == 0)
+        r2 = R_tick_inner_major if is_major else R_tick_inner_minor
+        ax.plot([R_inner*np.cos(ang), r2*np.cos(ang)],
+                [R_inner*np.sin(ang), r2*np.sin(ang)],
+                color=tick, linewidth=2 if is_major else 1.2, zorder=4)
+        if is_major:
+            # place labels slightly inside the inner radius
             rl = r2 - 0.10
-            ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
-                    ha="center", va="center", fontsize=9, color=label)
+            lbl = f"{int(v)}"
+            ax.text(rl*np.cos(ang), rl*np.sin(ang), lbl,
+                    ha="center", va="center", fontsize=9, color=label, zorder=5)
 
-    # --- Centered three-line white text with better spacing ---
-    ax.text(0, 0.15, "N1%", ha="center", va="center",
-            fontsize=11, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, 0.00, f"{n1:.1f}%", ha="center", va="center",
-            fontsize=14, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.15, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=11, color=txt_color, alpha=0.9, zorder=6)
+    # Red tick at MAX (end of bezel)
+    ang_max = scale_to_angle(10.0)
+    ax.plot([R_inner*np.cos(ang_max), (R_inner-0.09)*np.cos(ang_max)],
+            [R_inner*np.sin(ang_max), (R_inner-0.09)*np.sin(ang_max)],
+            color=red_tick, linewidth=3, zorder=5)
+
+    # Digital N1 box above the 0 position (just outside the bezel)
+    # Position slightly outside start point (3 o'clock)
+    ang0 = scale_to_angle(0.0)
+    x0, y0 = (R_outer + 0.14) * np.cos(ang0), (R_outer + 0.14) * np.sin(ang0)
+    box_w, box_h = 0.68, 0.28
+    rect = patches.FancyBboxPatch(
+        (x0 - box_w/2, y0 - box_h/2), box_w, box_h,
+        boxstyle="round,pad=0.02,rounding_size=0.06",
+        linewidth=2, edgecolor=box_line, facecolor=(0,0,0,0.0), zorder=10
+    )
+    ax.add_patch(rect)
+
+    # Text inside box: single line with one decimal (0.0 .. 10.0)
+    ax.text(x0, y0, f"{n1_scaled:.1f}",
+            ha="center", va="center",
+            fontsize=15, fontweight="bold", color=box_text, zorder=11)
 
     return fig
+
 
 
 def draw_n1_dial_airbus(n1: float, conf_pm: float):
