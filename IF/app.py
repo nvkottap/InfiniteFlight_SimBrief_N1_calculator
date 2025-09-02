@@ -443,178 +443,197 @@ def estimate_if_trim(data: Dict[str, Any]) -> Dict[str, Any]:
 # --------------------------
 # Dials (numeric readout is printed below via Streamlit)
 # --------------------------
+import numpy as np, math
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+
+# ---------- BOEING DIAL (matches your Boeing screenshot style) ----------
 def draw_n1_dial_boeing(n1_percent: float, max_n1_pct: float = 102.0):
     """
-    Boeing-style N1 dial (refined):
-      - Solid thin white bezel arc from 3 o'clock (0) clockwise to max N1% (red tick at end)
-      - Internal ticks with labels at 0,2,4,6,8,10 (only those within arc)
-      - V-shaped yellow arrow pointing inward (from outside toward center); tip sits just inside the bezel
-      - Square digital readout box (0.0..10.0) with bottom-center aligned above the 0 mark (no overlap)
-      - No bands, no pointer/needle
+    Boeing-style N1 dial:
+      - 0 at 3 o'clock; arc runs CW to aircraft max (red tick at end)
+      - Thin solid white bezel; internal ticks (labels 0,2,4,6,8,10 within arc)
+      - Yellow chevron '>' (outline only) pointing inward at current N1
+      - Square digital box (0.0..10.0) centered above the 0 mark (raised so it clears the ring)
+      - No fill bands or pointer needle
     """
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
-
-    # Map % to 0..10 scale for labels and readout (100% => 10.0)
-    def pct_to_scale(p):
+    def pct_to_scale(p):  # 100% -> 10.0
         return max(0.0, min(10.0, (p / 100.0) * 10.0))
 
-    n1_scaled = pct_to_scale(n1_percent)
-    max_scaled = pct_to_scale(max_n1_pct)
+    n1_sc   = pct_to_scale(n1_percent)
+    max_sc  = pct_to_scale(max_n1_pct)
 
-    # Geometry: start at 3 o'clock (0°), go CW to end angle based on max_scaled
-    start_deg = 0.0
-    end_deg = -225.0 * min(1.0, max_scaled / 10.0)  # ~10:30 for full 10.0
-    to_rad = np.deg2rad
+    start_deg = 0.0                             # 3 o'clock
+    end_deg   = -225.0 * min(1.0, max_sc/10.0)  # up to ~10:30
+    to_rad    = np.deg2rad
 
-    # Palette / styling
-    bg = "#0a0f14"
+    # Palette
+    bg    = "#0a0f14"
     white = "#ffffff"
     bezel_color = white
-    tick_color = white
+    tick_color  = white
     label_color = white
-    red_tick = "#d84b4b"
-    arrow_color = "#ffd21f"  # yellow Boeing bug
-    box_line = white
-    box_text = white
+    red_tick    = "#d84b4b"
+    chevron     = "#ffd21f"   # Boeing bug yellow
 
     # Figure
     fig, ax = plt.subplots(figsize=(3.6, 3.6))
     ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
-    # Radii / sizes
+    # Geometry
     R_ring = 0.98
-    ring_lw = 5.0               # thinner bezel
+    ring_lw = 2.6                 # thinner bezel
     tick_len_major = 0.11
     tick_len_minor = 0.06
     font_small = 9
-    font_big = 15
+    font_big   = 15
 
-    # Angle helper (0..10 → angle)
     def scale_to_angle(v):
-        frac = max(0.0, min(1.0, v / max(1e-6, max_scaled)))
+        frac = max(0.0, min(1.0, v / max(1e-6, max_sc)))
         return to_rad(start_deg + frac * (end_deg - start_deg))
 
-    # --- Bezel arc (solid thin white line) ---
-    theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 600)
+    # Bezel (thin solid white)
+    theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 720)
     ax.plot(R_ring*np.cos(theta), R_ring*np.sin(theta),
             color=bezel_color, linewidth=ring_lw, solid_capstyle='round', zorder=2)
 
-    # --- Internal ticks & labels (even-number labels) ---
+    # Internal ticks & labels (even numbers)
     for v in np.arange(0, 10.1, 1.0):
-        if v > max_scaled + 1e-6:
+        if v > max_sc + 1e-6:
             continue
         ang = scale_to_angle(v)
         is_major = (int(v) % 2 == 0)
         tlen = tick_len_major if is_major else tick_len_minor
         x1, y1 = R_ring*np.cos(ang), R_ring*np.sin(ang)
         x2, y2 = (R_ring - tlen)*np.cos(ang), (R_ring - tlen)*np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], color=tick_color, linewidth=2 if is_major else 1.3, zorder=3)
+        ax.plot([x1, x2], [y1, y2], color=tick_color, linewidth=2 if is_major else 1.2, zorder=3)
         if is_major:
             rl = R_ring - tlen - 0.08
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{int(v)}",
                     ha="center", va="center", fontsize=font_small, color=label_color, zorder=4)
 
-    # --- Red max tick at bezel end ---
-    ang_max = scale_to_angle(max_scaled)
+    # Red max tick at end of arc
+    ang_max = scale_to_angle(max_sc)
     x1m, y1m = R_ring*np.cos(ang_max), R_ring*np.sin(ang_max)
     x2m, y2m = (R_ring - tick_len_major - 0.02)*np.cos(ang_max), (R_ring - tick_len_major - 0.02)*np.sin(ang_max)
     ax.plot([x1m, x2m], [y1m, y2m], color=red_tick, linewidth=3, zorder=4)
 
-    # --- V-shaped arrow pointing inward (tip just inside the bezel) ---
-    ang_n1 = scale_to_angle(min(max(n1_scaled, 0.0), max_scaled))
-    tip_r = R_ring - 0.01                  # tip just inside ring
-    base_r = R_ring + 0.12                 # base outside ring
-    spread = np.deg2rad(10.0)              # triangle spread
-    tip   = np.array([tip_r*np.cos(ang_n1),  tip_r*np.sin(ang_n1)])
-    left  = np.array([base_r*np.cos(ang_n1 + spread), base_r*np.sin(ang_n1 + spread)])
-    right = np.array([base_r*np.cos(ang_n1 - spread), base_r*np.sin(ang_n1 - spread)])
-    arrow = patches.Polygon([left, tip, right], closed=True,
-                            facecolor=arrow_color, edgecolor=arrow_color, zorder=6)
-    ax.add_patch(arrow)
+    # Yellow chevron '>' (outline only), small, pointing inward
+    ang_n1  = scale_to_angle(min(max(n1_sc, 0.0), max_sc))
+    tip_r   = R_ring - 0.006                 # tip just inside the ring
+    base_r  = R_ring + 0.02                  # small offset outside (¼ previous size)
+    spread  = math.radians(5.0)              # narrow
+    tip     = np.array([tip_r*np.cos(ang_n1),  tip_r*np.sin(ang_n1)])
+    left    = np.array([base_r*np.cos(ang_n1 + spread), base_r*np.sin(ang_n1 + spread)])
+    right   = np.array([base_r*np.cos(ang_n1 - spread), base_r*np.sin(ang_n1 - spread)])
+    ax.plot([left[0],  tip[0]],  [left[1],  tip[1]],  color=chevron, linewidth=2.0, solid_capstyle='round', zorder=6)
+    ax.plot([right[0], tip[0]],  [right[1], tip[1]], color=chevron, linewidth=2.0, solid_capstyle='round', zorder=6)
 
-    # --- Square digital box at 0 mark, bottom-center ABOVE ring (no overlap) ---
+    # Square digital box at 0 mark, lifted so it clears the ring
     ang0 = scale_to_angle(0.0)
-    anchor_r = R_ring + 0.20               # lift it higher (was ~+0.10)
+    anchor_r = R_ring + 0.34       # moved up more per your note
     anchor_x, anchor_y = anchor_r*np.cos(ang0), anchor_r*np.sin(ang0)
-    box_w, box_h = 0.68, 0.28
-    # Bottom-center at (anchor_x, anchor_y):
-    ll = (anchor_x - box_w/2, anchor_y)    # lower-left
-    rect = patches.Rectangle(ll, box_w, box_h, linewidth=2, edgecolor=box_line,
+    box_w, box_h = 0.60, 0.26
+    ll = (anchor_x - box_w/2, anchor_y)  # bottom-center anchored above 0 mark
+    rect = patches.Rectangle(ll, box_w, box_h, linewidth=2, edgecolor=white,
                              facecolor=(0,0,0,0.0), zorder=10)
     ax.add_patch(rect)
-
-    # Text centered in box: 0.0..10.0
+    # Text centered in box: display 0.0..10.0
     cx, cy = (anchor_x, anchor_y + box_h/2)
-    ax.text(cx, cy + 0.01, f"{n1_scaled:.1f}",
+    ax.text(cx, cy + 0.01, f"{n1_sc:.1f}",
             ha="center", va="center", fontsize=font_big, fontweight="bold",
-            color=box_text, zorder=11)
+            color=white, zorder=11)
 
     return fig
 
-def draw_n1_dial_airbus(n1: float, conf_pm: float):
-    import numpy as np
-    min_n1, max_n1 = 0, 110
-    start_deg, end_deg = -210, 30
 
-    def clamp(v, lo, hi): return max(min(v, hi), lo)
-    def n1_to_angle(v):
-        frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
-        return math.radians(start_deg + frac * (end_deg - start_deg))
+# ---------- AIRBUS DIAL (matches your Airbus screenshot style) ----------
+def draw_n1_dial_airbus(n1_percent: float, max_n1_pct: float = 100.0):
+    """
+    Airbus-style N1 dial:
+      - Thin white bezel arc with short inner ticks
+      - Small white needle at current N1 (subtle)
+      - Red overboost segment near the top end (max N1)
+      - Green digital readout stacked INSIDE the dial, centered ("N1%", value, small "%")
+      - No outer bands
+    """
+    def pct_to_scale(p):  # 100% -> 10.0 (Airbus scale shows 5..10 marks)
+        return max(0.0, min(10.0, (p / 100.0) * 10.0))
 
-    # Airbus-style palette
-    bg = "#0b0b0b"
-    bezel = (1, 1, 1, 0.055)
-    tick = "#e8f2ff"
-    label = "#e8f2ff"
-    band = (1, 1, 1, 0.13)
-    txt_color = "#e8f2ff"  # WHITE(ish)
+    n1_sc  = pct_to_scale(n1_percent)
+    max_sc = pct_to_scale(max_n1_pct)
 
-    fig, ax = plt.subplots(figsize=(3.2, 3.2))
+    # Arc ~ from about 7:30 to ~1:30 (like the screenshot). We'll use -225° to -45°.
+    start_deg = -225.0
+    end_deg   = -45.0
+    to_rad    = np.deg2rad
+
+    bg = "#0a0f14"
+    white = "#ffffff"
+    green = "#7CFF5A"    # bright IF-style green
+    red   = "#d84b4b"
+
+    fig, ax = plt.subplots(figsize=(3.6, 3.6))
     ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
 
-    R_outer, R_inner = 1.00, 0.74
-    theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
-    # Bezel ring
-    ax.fill(np.r_[R_outer*np.cos(theta), R_inner*np.cos(theta[::-1])],
-            np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
-            color=bezel)
+    R_outer = 1.00
+    R_inner = 0.82
+    ring_lw = 2.6
+    tick_len = 0.06
+    font_mark = 10
+    font_val  = 16
+    font_lbl  = 10
 
-    # Confidence arc
-    t_pm = np.linspace(n1_to_angle(n1 - conf_pm), n1_to_angle(n1 + conf_pm), 80)
-    ax.fill(np.r_[R_outer*np.cos(t_pm), (R_outer-0.06)*np.cos(t_pm[::-1])],
-            np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
-            color=band)
+    def scale_to_angle(v):
+        # Map 0..10 across the visible arc (Airbus tick density looks uniform)
+        frac = max(0.0, min(1.0, v/10.0))
+        return to_rad(start_deg + frac * (end_deg - start_deg))
 
-    # Normal band 80–102
-    t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
-    ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
-            np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
-            color=(60/255, 204/255, 140/255, 0.20))
+    # Bezel ring (thin)
+    theta = np.linspace(to_rad(start_deg), to_rad(end_deg), 720)
+    ax.plot(R_outer*np.cos(theta), R_outer*np.sin(theta),
+            color=white, linewidth=ring_lw, solid_capstyle='round', zorder=2)
 
-    # Ticks & numerals
-    for val in range(0, 111, 5):
-        ang = n1_to_angle(val); major = (val % 10 == 0)
-        r2 = R_inner - (0.06 if major else 0.03)
-        ax.plot([R_outer*np.cos(ang), r2*np.cos(ang)],
-                [R_outer*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
-        if major and 0 < val < 110:
-            rl = r2 - 0.10
-            ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
-                    ha="center", va="center", fontsize=9, color=label)
+    # Short inner ticks every unit; show major labels near 5 and 10 like the screenshot
+    for v in np.arange(0, 10.1, 1.0):
+        ang = scale_to_angle(v)
+        x1, y1 = R_outer*np.cos(ang), R_outer*np.sin(ang)
+        x2, y2 = (R_outer - tick_len)*np.cos(ang), (R_outer - tick_len)*np.sin(ang)
+        ax.plot([x1, x2], [y1, y2], color=white, linewidth=1.4, zorder=3)
+        if abs(v-5.0) < 0.01 or abs(v-10.0) < 0.01:
+            rl = R_outer - tick_len - 0.10
+            ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{int(v)}",
+                    ha="center", va="center", fontsize=font_mark, color=white, zorder=4)
 
-    # --- Centered three-line white text ---
+    # Red overboost segment: last ~0.8 of the 10-mark
+    over_lo = max(0.0, 9.2)
+    over_hi = min(10.0, max_sc)
+    if over_hi > over_lo:
+        t_over = np.linspace(scale_to_angle(over_lo), scale_to_angle(over_hi), 60)
+        ax.plot(R_outer*np.cos(t_over), R_outer*np.sin(t_over),
+                color=red, linewidth=ring_lw+0.6, solid_capstyle='butt', zorder=5)
+
+    # Small white needle at current N1
+    ang_n1 = scale_to_angle(n1_sc)
+    needle_r1 = R_inner - 0.05
+    needle_r2 = R_outer - 0.04
+    ax.plot([needle_r1*np.cos(ang_n1), needle_r2*np.cos(ang_n1)],
+            [needle_r1*np.sin(ang_n1), needle_r2*np.sin(ang_n1)],
+            color=white, linewidth=2.2, solid_capstyle='round', zorder=6)
+
+    # Digital readout INSIDE the dial (stacked, centered, green)
     ax.text(0, 0.08, "N1%", ha="center", va="center",
-            fontsize=11, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.02, f"{n1:.1f}%", ha="center", va="center",
-            fontsize=13, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=10, color=txt_color, alpha=0.9, zorder=6)
+            fontsize=12, color=green, zorder=7)
+    ax.text(0, -0.02, f"{n1_percent:.1f}",
+            ha="center", va="center", fontsize=18, fontweight="bold",
+            color=green, zorder=7)
+    ax.text(0, -0.13, "%", ha="center", va="center",
+            fontsize=12, color=green, zorder=7)
 
     return fig
+
 
 def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None):
     bg, lane, tick, label = "#0a0f14", (1,1,1,0.05), "#e8edf6", "#e8edf6"
