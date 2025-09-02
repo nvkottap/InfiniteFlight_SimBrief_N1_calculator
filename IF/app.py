@@ -380,8 +380,12 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     # Guardrail floor & cap
     weight_ratio = max(0.8, (tow_klb or w_ref) / w_ref)
     n1_floor = 88.0 + 5.5*weight_ratio + 0.35*pa_kft + 0.25*max(0.0, sel_val - base_val)
+    # Cap by airframe-specific max (fallback to 103 if missing)
+    af = AIRFRAMES.get(series, {})
+    n1_cap = float(af.get("n1_max_pct", 103.0))
+    n1 = min(n1, n1_cap)
     n1 = max(n1, n1_floor)
-    n1 = min(n1, 103.0)
+  
 
     # Blend toward any airframe overrides
     n1 = apply_n1_overrides(series, sel_label or "", tow_klb, n1)
@@ -783,13 +787,15 @@ if go and txt.strip():
         with c1:
             st.caption("Engine N1")
             if brand == "airbus":
-                st.pyplot(draw_n1_dial_airbus(n1, conf), use_container_width=False)
+                max_cap = AIRFRAMES.get(series, {}).get("n1_max_pct", 102.0)
+                st.pyplot(draw_n1_dial_airbus(n1_percent=n1, max_n1_pct=max_cap), use_container_width=False)
+
             else:
                 # Pick an aircraft-specific practical max N1% for the bezel extent
                 # (you can store this in AIRFRAMES[series].get("n1_max_pct", 102.0) if you like)
                 max_cap = AIRFRAMES.get(series, {}).get("n1_max_pct", 102.0)
-
                 st.pyplot(draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=max_cap), use_container_width=False)
+
 
         
 
