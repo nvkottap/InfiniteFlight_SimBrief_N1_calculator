@@ -468,7 +468,8 @@ PASTE_KEYS = {
     "AICE": r"\bA/ICE\s+(ON|OFF)",
     "APT": r"\bAPT\s+([A-Z]{4})\/?([A-Z]{3})?",
     "RWY": r"\bRWY\s+([0-9]{2}[LRC]?)/\+\d|\bRWY\s+([0-9]{2}[LRC]?)",
-    "ENGINE_LINE": r"TAKEOFF PERFORMANCE.*\n([N0-9A-Z\- ]+?)\n",
+    # was: "ENGINE_LINE": r"TAKEOFF PERFORMANCE.*\n([N0-9A-Z\- ]+?)\n",
+    "ENGINE_LINE": r"TAKEOFF PERFORMANCE[^\n]*\n([^\n]+)\n",
     "TYPE": r"N\d+\s+([A-Z0-9\- ]+?)\s+(LEAP|CFM|PW|GE|TRENT|XWB|CFM56|GE90|PW20|LEAP-1B|LEAP-1A)",
     # V-speeds (and related)
     "V1": r"\bV1\s+(\d{2,3})\b",
@@ -502,20 +503,47 @@ def parse_paste(text: str) -> Dict[str, Any]:
             out[k] = m.group(1).strip().upper()
     return out
 
-def guess_series_and_brand(parsed: Dict[str,Any]) -> Tuple[str,str]:
-    raw = (parsed.get("TYPE") or parsed.get("ENGINE_LINE") or "").upper()
-    if "A380" in raw: return "airbus_a380", "airbus"
-    if "A350" in raw: return "airbus_a350", "airbus"
-    if "A321" in raw: return "airbus_a321", "airbus"
-    if "A320" in raw: return "airbus_a320", "airbus"
-    if "A330" in raw: return "airbus_a330", "airbus"
-    if "737 MAX" in raw or "B737 MAX" in raw or "737-8" in raw: return "boeing_737_max8","boeing"
-    if "B777" in raw or "777-" in raw or "B777-200" in raw or "777-200" in raw: return "boeing_777","boeing"
-    if "B757" in raw or "757-" in raw: return "boeing_757","boeing"
-    if "B787" in raw or "787-" in raw: return "boeing_787","boeing"
-    if "AIRBUS" in raw: return "generic","airbus"
-    if "BOEING" in raw: return "generic","boeing"
-    return "generic","boeing"
+def guess_series_and_brand(parsed: Dict[str, Any]) -> tuple[str, str]:
+    """
+    Robustly infer airframe series + brand from TYPE and ENGINE_LINE.
+    Handles slashes (e.g., CFM56-5B3/P) and hyphens (e.g., A321-200).
+    """
+    line = f"{parsed.get('TYPE','')} {parsed.get('ENGINE_LINE','')}".upper()
+    # Normalize separators
+    norm = line.replace("/", " ").replace("-", " ")
+    tokens = norm.split()
+
+    joined = " " .join(tokens)
+
+    # Airbus first (specific → general)
+    if "A380" in joined: return "airbus_a380", "airbus"
+    if "A350" in joined: return "airbus_a350", "airbus"
+    if "A321" in joined: return "airbus_a321", "airbus"
+    if "A320" in joined: return "airbus_a320", "airbus"
+    if "A330" in joined: return "airbus_a330", "airbus"
+
+    # Boeing (specific → general)
+    if any(k in joined for k in ["737 MAX", "B737 MAX", "737 8", "737-8".replace("-"," ")]):
+        return "boeing_737_max8", "boeing"
+    if any(k in joined for k in ["777 200", "B777 200", "B777", "777"]):
+        return "boeing_777", "boeing"
+    if "757" in joined: return "boeing_757", "boeing"
+    if "787" in joined: return "boeing_787", "boeing"
+
+    # Fallback by explicit brand words, if present
+    if "AIRBUS" in joined: return "generic", "airbus"
+    if "BOEING" in joined: return "generic", "boeing"
+
+    # Last resort: infer from engine families (very weak heuristic)
+    eng_hint = joined
+    if any(k in eng_hint for k in ["LEAP 1A", "CFM56 5B", "TRENT XWB", "TRENT 970"]):
+        return "generic", "airbus"
+    if any(k in eng_hint for k in ["LEAP 1B", "GE90", "PW20", "CFM56 7"]):
+        return "generic", "boeing"
+
+    # Safe default
+    return "generic", "boeing"
+
 
 # ----------------------------- UI -----------------------------
 st.title("SimBrief Takeoff Performance to Infinite Flight Converter Tool")
