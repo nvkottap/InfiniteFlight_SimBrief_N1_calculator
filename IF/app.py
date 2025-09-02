@@ -301,20 +301,23 @@ def derate_level_from_mode(mode: str) -> int:
     return 0  # FLEX or unknown
 
 def apply_n1_overrides(series: str, flaps_label: str, tow_klb: float, n1_est: float) -> float:
-    af = get_airframe(series)
+    af = AIRFRAMES.get(series, {})
     overrides = af.get("n1_overrides", [])
     if not overrides:
         return n1_est
-    # Choose same flaps label; weight_frac is coarse (0..1). We don't have MTOW here,
-    # so pick the first matching label and blend toward target to avoid jumps.
-    candidates = [ov for ov in overrides if ov.get("flaps_label","").upper() == (flaps_label or "").upper()]
-    if not candidates:
+    mtow = float(af.get("mtow_klb", 0) or 0)
+    if mtow <= 0:
         return n1_est
-    # Simple strategy: pick the median candidate and blend 40% toward target
-    ov = candidates[min(len(candidates)//2, len(candidates)-1)]
+    wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow))
+    # choose same flaps label & nearest weight_frac
+    cands = [ov for ov in overrides if ov.get("flaps_label","").upper() == (flaps_label or "").upper()]
+    if not cands:
+        return n1_est
+    best = min(cands, key=lambda ov: abs(wf - float(ov.get("weight_frac", 0.6))))
     try:
-        target = float(ov["n1_target"])
-        return 0.6 * n1_est + 0.4 * target
+        target = float(best["n1_target"])
+        # blend toward target
+        return 0.55 * n1_est + 0.45 * target
     except:
         return n1_est
 
@@ -351,6 +354,13 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     pa_ft = pressure_altitude_ft(elev_ft or 0.0, qnh_inhg or 29.92)
     pa_kft = max(pa_ft, 0.0) / 1000.0
     derate_steps = derate_level_from_mode(thrust_mode or "")
+    # Derate effectiveness: lighter planes benefit more, heavy planes less
+    af = AIRFRAMES.get(series, {})
+    mtow = float(af.get("mtow_klb", 0) or 0)
+    wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow)) if mtow > 0 else 0.6
+    # Adjust the base derate effect by shifting N1 back up when very heavy
+    n1 += 0.8 * derate_steps * (wf - 0.6)  # >0 if wf>0.6, reduces "benefit" at high weight
+
     wt_term = ((tow_klb or w_ref) - w_ref)
 
     # Base model
