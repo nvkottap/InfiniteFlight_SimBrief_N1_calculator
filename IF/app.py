@@ -585,6 +585,10 @@ if go:
     trim_pct = estimate_trim_if(series=series, brand=brand,
                                 flaps_label=selected_flaps_label, tow_klb=tow_klb)
 
+    # Explicit PA for info bar (always available)
+    pa_disp_ft = pressure_altitude_ft(field_elev_ft=elev, qnh_inhg=qnh)
+
+
    # -------- Metrics strip (top) – high contrast, with PA; no Green Dot --------
     v1  = data.get("V1")
     vr  = data.get("VR")
