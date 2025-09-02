@@ -121,6 +121,43 @@ def get_flap_detents(brand: str, header_or_text: str) -> list[str]:
 # --------------------------
 # Parsing & helpers
 # --------------------------
+def _parse_qnh_inhg(txt: str) -> Optional[float]:
+    """
+    Accept QNH in either inHg (e.g., 29.92 or 30.01) or hPa (e.g., 1013, 1021, 1005 HPA)
+    and return inHg as a float.
+    """
+    # Try explicit inHg patterns first: "QNH 29.92", "QNH: 30.01"
+    m = re.search(r"\bQNH[:\s]+(\d{2}\.\d{2})\b", txt, flags=re.I)
+    if m:
+        try:
+            return float(m.group(1))
+        except:
+            pass
+
+    # Try hPa patterns: "QNH 1013", "QNH 1021 HPA", "QNH: 1005hPa"
+    m = re.search(r"\bQNH[:\s]+(\d{3,4})\s*(HPA)?\b", txt, flags=re.I)
+    if m:
+        try:
+            hpa = float(m.group(1))
+            if 850.0 <= hpa <= 1100.0:         # sanity range for sea-level QNH
+                return hpa * 0.0295299830714    # hPa → inHg
+        except:
+            pass
+
+    # Also accept "QNH 1013.2" (rare)
+    m = re.search(r"\bQNH[:\s]+(\d{3,4}\.\d)\s*(HPA)?\b", txt, flags=re.I)
+    if m:
+        try:
+            hpa = float(m.group(1))
+            if 850.0 <= hpa <= 1100.0:
+                return hpa * 0.0295299830714
+        except:
+            pass
+
+    return None
+
+
+
 def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
     for token, eng_id in ENGINE_ALIASES.items():
         if re.search(rf"\b{re.escape(token)}\b", txt, flags=re.I):
@@ -183,8 +220,12 @@ def parse_takeoff_text(txt: str) -> Dict[str, Any]:
 
     # Weather
     m = re.search(r"OAT\s+(-?\d+)", txt);        d["oat_c"] = float(m.group(1)) if m else None
-    m = re.search(r"QNH\s+(\d{2}\.\d{2})", txt); d["qnh_inhg"] = float(m.group(1)) if m else None
+
+    # QNH: accept inHg OR hPa and store as inHg
+    d["qnh_inhg"] = _parse_qnh_inhg(txt)
+
     m = re.search(r"ELEV\s+(-?\d+)", txt);       d["elev_ft"] = float(m.group(1)) if m else None
+
 
     # Inputs/outputs
     m = re.search(r"WEIGHT\s+(\d+\.?\d*)", txt); d["tow_klb"] = float(m.group(1)) if m else None
