@@ -453,12 +453,13 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
         frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * (end_deg - start_deg))
 
-    # Boeing-ish dark panel
+    # Boeing-style palette
     bg = "#0a0f14"
     bezel = (1, 1, 1, 0.06)
     tick = "#e8edf6"
     label = "#e8edf6"
     band = (1, 1, 1, 0.14)
+    txt_color = "#e8edf6"  # WHITE(ish)
 
     fig, ax = plt.subplots(figsize=(3.2, 3.2))
     ax.set_aspect("equal"); ax.axis("off")
@@ -471,13 +472,13 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
             np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
             color=bezel)
 
-    # “Normal” band 80–102 (subtle)
+    # Normal band 80–102
     t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
     ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
             np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
             color=(60/255, 204/255, 140/255, 0.20))
 
-    # Confidence arc (light veil)
+    # Confidence arc
     t_pm = np.linspace(n1_to_angle(n1 - conf_pm), n1_to_angle(n1 + conf_pm), 80)
     ax.fill(np.r_[R_outer*np.cos(t_pm), (R_outer-0.06)*np.cos(t_pm[::-1])],
             np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
@@ -494,15 +495,11 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
                     ha="center", va="center", fontsize=9, color=label)
 
-    # Center “light” disc for black text
-    center_disc = plt.Circle((0, 0), 0.36, color=(1, 1, 1, 0.92), zorder=5)
-    ax.add_artist(center_disc)
-
-    # Digital readout inside dial (black, bold)
-    ax.text(0, 0.03, f"N1% = {n1:.1f}%", ha="center", va="center",
-            fontsize=14, fontweight="bold", color="#000000", zorder=6)
-    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=10, color="#000000", alpha=0.75, zorder=6)
+    # --- Centered stacked white text (no pointer, no center disc) ---
+    ax.text(0, 0.06, f"N1% = {n1:.1f}%", ha="center", va="center",
+            fontsize=12, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.08, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=9, color=txt_color, alpha=0.9, zorder=6)
 
     return fig
 
@@ -517,12 +514,13 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
         frac = (clamp(v, min_n1, max_n1) - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * (end_deg - start_deg))
 
-    # Airbus-ish darker panel
+    # Airbus-style palette
     bg = "#0b0b0b"
     bezel = (1, 1, 1, 0.055)
     tick = "#e8f2ff"
     label = "#e8f2ff"
     band = (1, 1, 1, 0.13)
+    txt_color = "#e8f2ff"  # WHITE(ish)
 
     fig, ax = plt.subplots(figsize=(3.2, 3.2))
     ax.set_aspect("equal"); ax.axis("off")
@@ -530,6 +528,7 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
 
     R_outer, R_inner = 1.00, 0.74
     theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 240)
+    # Bezel
     ax.fill(np.r_[R_outer*np.cos(theta), R_inner*np.cos(theta[::-1])],
             np.r_[R_outer*np.sin(theta), R_inner*np.sin(theta[::-1])],
             color=bezel)
@@ -540,7 +539,7 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
             np.r_[R_outer*np.sin(t_pm), (R_outer-0.06)*np.sin(t_pm[::-1])],
             color=band)
 
-    # “Normal” band 80–102 (subtle)
+    # Normal band 80–102
     t_norm = np.linspace(n1_to_angle(80), n1_to_angle(102), 120)
     ax.fill(np.r_[R_outer*np.cos(t_norm), R_inner*np.cos(t_norm[::-1])],
             np.r_[R_outer*np.sin(t_norm), R_inner*np.sin(t_norm[::-1])],
@@ -557,17 +556,14 @@ def draw_n1_dial_airbus(n1: float, conf_pm: float):
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
                     ha="center", va="center", fontsize=9, color=label)
 
-    # Center light disc for black text
-    center_disc = plt.Circle((0, 0), 0.36, color=(1, 1, 1, 0.92), zorder=5)
-    ax.add_artist(center_disc)
-
-    # Digital readout inside dial (black)
-    ax.text(0, 0.03, f"N1% = {n1:.1f}%", ha="center", va="center",
-            fontsize=14, fontweight="bold", color="#000000", zorder=6)
-    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=10, color="#000000", alpha=0.75, zorder=6)
+    # --- Centered stacked white text (no pointer, no center disc) ---
+    ax.text(0, 0.06, f"N1% = {n1:.1f}%", ha="center", va="center",
+            fontsize=12, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.08, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=9, color=txt_color, alpha=0.9, zorder=6)
 
     return fig
+
 
 def draw_flap_detent_guide(detents: list[str], selected_label: Optional[str] = None):
     bg, lane, tick, label = "#0a0f14", (1,1,1,0.05), "#e8edf6", "#e8edf6"
@@ -717,20 +713,7 @@ if go and txt.strip():
                 st.pyplot(draw_n1_dial_airbus(n1, conf), use_container_width=False)
             else:
                 st.pyplot(draw_n1_dial_boeing(n1, conf), use_container_width=False)
-            # Big, black readout under the dial
-            st.markdown(
-                f"""
-                <div style='text-align:center; margin-top:-6px;'>
-                    <span style='font-size:1.6rem; font-weight:800; color:#000000;'>
-                        N1% = {n1:.1f}%
-                    </span><br>
-                    <span style='font-size:1.0rem; color:#000000; opacity:0.75;'>
-                        ±{conf:.1f}%
-                    </span>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        
 
         with c2:
             st.caption("Flaps")
