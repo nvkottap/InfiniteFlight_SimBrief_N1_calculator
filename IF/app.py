@@ -624,7 +624,7 @@ if go and txt.strip():
                 f"""
                 <div style='text-align:center; margin-top:-6px;'>
                     <span style='font-size:1.6rem; font-weight:800; color:#000000;'>
-                        N1% = {n1:.1f}
+                        N1% = {n1:.1f}%
                     </span><br>
                     <span style='font-size:1.0rem; color:#000000; opacity:0.75;'>
                         ±{conf:.1f}%
