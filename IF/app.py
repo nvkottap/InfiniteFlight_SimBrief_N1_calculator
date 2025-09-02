@@ -400,12 +400,6 @@ def draw_trim_bar(trim_pct: float):
 
 
 def draw_flap_detents_small(brand: str, series: str, selected_label: str):
-    """
-    Compact flap ladder:
-      • Top = flaps up (0), bottom = full flaps
-      • Shows "Flaps [setting]" at the TOP of the ladder
-      • Labels left-aligned; highlight hugs ladder (no text overlap)
-    """
     detents = get_flap_detents(brand, series)
     det_norm = [d.upper() for d in detents]
     sel_norm = (selected_label or "").upper()
@@ -418,31 +412,27 @@ def draw_flap_detents_small(brand: str, series: str, selected_label: str):
 
     n = len(detents)
     ax.set_xlim(0, 1)
-    ax.set_ylim(n - 0.5, -0.5)  # invert so 0 at top
+    ax.set_ylim(n - 0.5, -0.5)  # 0 at top → FULL at bottom
 
     x_ladder = 0.62
     ax.plot([x_ladder, x_ladder], [0, n - 1], color=white, linewidth=2.0)
 
-    # ticks + labels
     for i, lab in enumerate(detents):
         ax.plot([x_ladder - 0.06, x_ladder + 0.06], [i, i], color=white, linewidth=1.6)
         ax.text(x_ladder - 0.10, i, lab, va="center", ha="right", fontsize=10, color=white)
 
-    # selection box
     if sel_norm in det_norm:
         idx = det_norm.index(sel_norm)
         ax.add_patch(plt.Rectangle((x_ladder - 0.08, idx - 0.35), 0.16, 0.7,
                                    fill=False, edgecolor=yellow, linewidth=2.0))
 
-    # title at the TOP with selected setting
+    # Header at the top: "Flaps X"
     ax.text(0.5, -0.10, f"Flaps {selected_label}", ha="center", va="bottom",
             fontsize=11, color=white, fontweight="bold", transform=ax.transAxes)
 
     ax.set_yticks([])
-    try:
-        fig.tight_layout(pad=0.2)
-    except Exception:
-        pass
+    try: fig.tight_layout(pad=0.2)
+    except: pass
     return fig
 
 
@@ -621,7 +611,7 @@ with col_right:
     s1, s2 = st.columns(2, gap="small")
     with s1:
         detents = get_flap_detents(brand, series)
-        fig_f = draw_flap_detents_small(brand, detents, selected_flaps_label)
+        fig_f = draw_flap_detents_small(brand, series, selected_flaps_label)
         with st.container():
             st.pyplot(fig_f, use_container_width=False)
     with s2:
