@@ -1,0 +1,119 @@
+{
+  "leap-1b28": {
+    "label": "LEAP-1B",
+    "ref_weight_klb": 160,
+    "weight_slope": 0.010,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "D-TO2": {
+        "anchors": [
+          {"deltaT": 46, "pa_kft": 0.0, "n1": 88.2},
+          {"deltaT": 17, "pa_kft": 7.3, "n1": 91.5}
+        ]
+      },
+      "D-TO": {
+        "anchors": [
+          {"deltaT": 48, "pa_kft": 0.0, "n1": 88.8}
+        ]
+      },
+      "FLEX": {
+        "anchors": [
+          {"deltaT": 30, "pa_kft": 0.0, "n1": 89.5}
+        ]
+      }
+    }
+  },
+
+  "ge90-94b": {
+    "label": "GE90-94B",
+    "ref_weight_klb": 460,
+    "weight_slope": 0.010,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "D-TO2": {
+        "anchors": [
+          {"deltaT": 47, "pa_kft": 0.0, "n1": 89.8},
+          {"deltaT": 50, "pa_kft": 0.0, "n1": 90.0}
+        ]
+      }
+    }
+  },
+
+  "trent-970-84": {
+    "label": "Trent 970-84",
+    "ref_weight_klb": 800,
+    "weight_slope": 0.002,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "FLEX": {
+        "anchors": [
+          {"deltaT": 66-28, "pa_kft": 0.0, "n1": 91.3}
+        ]
+      }
+    }
+  },
+
+  "trent-xwb-84": {
+    "label": "Trent XWB-84",
+    "ref_weight_klb": 590,
+    "weight_slope": 0.005,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "FLEX": {
+        "anchors": [
+          {"deltaT": 40-27, "pa_kft": 0.0, "n1": 90.5},
+          {"deltaT": 47-34, "pa_kft": 0.0, "n1": 90.0}
+        ]
+      }
+    }
+  },
+
+  "cfm56-5b3": {
+    "label": "CFM56-5B3/P",
+    "ref_weight_klb": 158,
+    "weight_slope": 0.010,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "FLEX": {
+        "anchors": [
+          {"deltaT": 56-15, "pa_kft": 0.0, "n1": 89.7}
+        ]
+      }
+    }
+  },
+
+  "cfm56-5b4": {
+    "label": "CFM56-5B4/P",
+    "ref_weight_klb": 148,
+    "weight_slope": 0.010,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "FLEX": {
+        "anchors": [
+          {"deltaT": 64-25, "pa_kft": 0.0, "n1": 87.7}
+        ]
+      }
+    }
+  },
+
+  "pw2037": {
+    "label": "PW2037",
+    "ref_weight_klb": 235,
+    "weight_slope": 0.010,
+    "bleed_bump": 0.20,
+    "antiice_bump": 0.50,
+    "modes": {
+      "D-TO": {
+        "anchors": [
+          {"deltaT": 37-9, "pa_kft": 0.0, "n1": 89.7}
+        ]
+      }
+    }
+  }
+}
