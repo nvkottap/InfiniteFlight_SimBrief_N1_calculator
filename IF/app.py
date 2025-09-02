@@ -11,6 +11,21 @@ import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns  # ← NEW
+import math
+
+def _rgba_to_mpl(rgba_str, fallback="#cccccc", alpha_fallback=0.2):
+    """
+    Convert 'rgba(r,g,b,a)' to (r/255,g/255,b/255,a). If parsing fails, fallback.
+    """
+    try:
+        import re
+        m = re.match(r"rgba\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*([0-9.]+)\)", rgba_str.strip(), flags=re.I)
+        if not m: return fallback
+        r,g,b,a = m.groups()
+        return (int(r)/255.0, int(g)/255.0, int(b)/255.0, float(a))
+    except Exception:
+        return (0.8, 0.8, 0.8, alpha_fallback)
+
 
 # ----- Seaborn global style (cleaner visuals) -----
 sns.set_theme(style="whitegrid", context="talk")  # slightly larger fonts overall
@@ -54,6 +69,31 @@ ENGINE_PRETTY = {
     "generic": "Generic"
 }
 
+# --- MFD Style Palettes ---
+MFD_STYLES = {
+    "boeing": {
+        "bg": "#0a0f14",           # deep gray-blue (PFD/ND look)
+        "tick": "#d8e6ff",         # off-white ticks
+        "label": "#d8e6ff",        # off-white labels
+        "needle": "#ffd21f",       # Boeing-ish yellow bug
+        "band": "rgba(255,210,31,0.20)",  # semi transparent yellow band (we'll parse)
+        "green": "rgba(60, 190, 120, 0.25)",  # normal band
+        "hub": "#d8e6ff",
+        "title": "#d8e6ff",
+        "grid_alpha": 0.0
+    },
+    "airbus": {
+        "bg": "#0b0b0b",           # darker charcoal
+        "tick": "#bfe3ff",         # light cyan-ish Airbus glass look
+        "label": "#bfe3ff",
+        "needle": "#00ffd0",       # Airbus cyan cue
+        "band": "rgba(0,255,208,0.18)",
+        "green": "rgba(100, 220, 140, 0.25)",
+        "hub": "#bfe3ff",
+        "title": "#bfe3ff",
+        "grid_alpha": 0.0
+    }
+}
 def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
     """
     Scan the entire pasted text for any known engine token.
@@ -146,14 +186,24 @@ def draw_n1_gauge(n1: float, conf_pm: float):
     ax.set_xlabel("N1 (%)")
     ax.set_title(f"N1 target ≈ {n1:.1f}%  (±{conf_pm:.1f}%)", fontsize=18)  # bigger title
     return fig
-import math
 
-def draw_n1_dial(n1: float, conf_pm: float):
+def draw_n1_dial(n1: float, conf_pm: float, style: str = "boeing"):
     """
-    Compact MFD-style N1 dial: 70–110% arc with tick marks, green band, target bug, and ± band.
+    Compact MFD-style N1 dial with Boeing/Airbus themes.
+    Arc 70–110%, ticks q5%, labels q10%, green normal band, target bug, ± band.
     """
+    # Style picks
+    S = MFD_STYLES.get(style.lower(), MFD_STYLES["boeing"])
+    bg = S["bg"]
+    c_tick = S["tick"]
+    c_label = S["label"]
+    c_needle = S["needle"]
+    c_band = _rgba_to_mpl(S["band"])
+    c_green = _rgba_to_mpl(S["green"])
+    c_hub = S["hub"]
+    c_title = S["title"]
+
     min_n1, max_n1 = 70, 110
-    # Map N1 to angle (in radians). We’ll draw a ~240° arc (from -210° to +30°).
     start_deg, end_deg = -210, 30
     span_deg = end_deg - start_deg
 
@@ -162,100 +212,110 @@ def draw_n1_dial(n1: float, conf_pm: float):
         frac = (v - min_n1) / (max_n1 - min_n1)
         return math.radians(start_deg + frac * span_deg)
 
-    fig, ax = plt.subplots(figsize=(3.8, 3.8))  # small dial
+    fig, ax = plt.subplots(figsize=(3.8, 3.8))
     ax.set_aspect("equal")
     ax.axis("off")
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
 
-    # Dial geometry
     R_outer = 1.0
-    R_inner = 0.75
-    center = (0, 0)
+    R_inner = 0.74
 
-    # Background arc (face)
+    # Dial face
     theta = np.linspace(math.radians(start_deg), math.radians(end_deg), 300)
     x_outer = R_outer * np.cos(theta); y_outer = R_outer * np.sin(theta)
     x_inner = R_inner * np.cos(theta[::-1]); y_inner = R_inner * np.sin(theta[::-1])
     ax.fill(np.concatenate([x_outer, x_inner]),
             np.concatenate([y_outer, y_inner]),
-            alpha=0.06)
+            color=(1,1,1,0.04))
 
-    # Green “normal thrust” band (80–102%)
-    green_lo, green_hi = 80, 102
-    t_band = np.linspace(n1_to_angle(green_lo), n1_to_angle(green_hi), 120)
+    # Green "normal" band (80–102%)
+    g0, g1 = 80, 102
+    t_band = np.linspace(n1_to_angle(g0), n1_to_angle(g1), 120)
     xb_o = R_outer * np.cos(t_band); yb_o = R_outer * np.sin(t_band)
     xb_i = R_inner * np.cos(t_band[::-1]); yb_i = R_inner * np.sin(t_band[::-1])
     ax.fill(np.concatenate([xb_o, xb_i]),
             np.concatenate([yb_o, yb_i]),
-            alpha=0.18)
+            color=c_green)
 
-    # ± band around the target
+    # ± band around target
     band_lo, band_hi = n1 - conf_pm, n1 + conf_pm
     t_pm = np.linspace(n1_to_angle(band_lo), n1_to_angle(band_hi), 80)
     xp_o = R_outer * np.cos(t_pm); yp_o = R_outer * np.sin(t_pm)
     xp_i = (R_outer - 0.05) * np.cos(t_pm[::-1]); yp_i = (R_outer - 0.05) * np.sin(t_pm[::-1])
     ax.fill(np.concatenate([xp_o, xp_i]),
             np.concatenate([yp_o, yp_i]),
-            alpha=0.15)
+            color=c_band)
 
-    # Tick marks every 5%, labels every 10%
+    # Tick marks & labels
     for val in range(70, 111, 5):
         ang = n1_to_angle(val)
-        r1 = R_inner - 0.03 if val % 10 else R_inner - 0.06
+        is_major = (val % 10 == 0)
+        r2 = R_inner - (0.06 if is_major else 0.03)
         x1, y1 = R_outer * np.cos(ang), R_outer * np.sin(ang)
-        x2, y2 = r1 * np.cos(ang), r1 * np.sin(ang)
-        ax.plot([x1, x2], [y1, y2], linewidth=2)
+        x2, y2 = r2 * np.cos(ang), r2 * np.sin(ang)
+        ax.plot([x1, x2], [y1, y2], color=c_tick, linewidth=2)
 
-        if val % 10 == 0:
-            # Label a bit inside
-            rl = r1 - 0.10
+        if is_major:
+            rl = r2 - 0.10
             xl, yl = rl * np.cos(ang), rl * np.sin(ang)
-            ax.text(xl, yl, f"{val}", ha="center", va="center", fontsize=9)
+            ax.text(xl, yl, f"{val}", ha="center", va="center",
+                    fontsize=9, color=c_label)
 
-    # Target “bug” needle
+    # Target “bug” (needle)
     ang_tgt = n1_to_angle(n1)
     xh, yh = (R_inner - 0.18) * np.cos(ang_tgt), (R_inner - 0.18) * np.sin(ang_tgt)
-    ax.plot([0, xh], [0, yh], linewidth=3)
-    ax.add_artist(plt.Circle(center, 0.05))  # hub
+    ax.plot([0, xh], [0, yh], color=c_needle, linewidth=3)
+    hub = plt.Circle((0, 0), 0.05, color=c_hub)
+    ax.add_artist(hub)
 
-    # Readout
-    ax.text(0, -0.55, f"N1  {n1:.1f}%", ha="center", va="center", fontsize=14, fontweight="bold")
-    ax.text(0, -0.72, f"±{conf_pm:.1f}%", ha="center", va="center", fontsize=9)
+    # Readouts (Boeing/Airbus-ish)
+    ax.text(0, -0.55, f"N1  {n1:.1f}%", ha="center", va="center",
+            fontsize=14, fontweight="bold", color=c_title)
+    ax.text(0, -0.72, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=9, color=c_label)
 
     return fig
 
 
-def draw_flap_schematic(flaps_value: int, airframe_hint: str = ""):
+
+def draw_flap_schematic(flaps_value: int, airframe_hint: str = "", style: str = "boeing"):
     """
-    Simple wing planform with slats/flaps. Generic proportions; just for quick visual confirmation.
-    airframe_hint: string containing manufacturer keywords to adjust label style (e.g., “A321”, “B737”).
+    Simple wing planform; theme colors follow dial style.
     """
-    fig, ax = plt.subplots(figsize=(4.2, 2.6))
+    S = MFD_STYLES.get(style.lower(), MFD_STYLES["boeing"])
+    bg = S["bg"]
+    ink = S["label"]
+
+    fig, ax = plt.subplots(figsize=(4.0, 2.4))
     ax.axis("off")
+    fig.patch.set_facecolor(bg)
+    ax.set_facecolor(bg)
     ax.set_xlim(0, 10)
     ax.set_ylim(0, 4)
 
     # Wing body
-    ax.add_patch(plt.Rectangle((1, 2.0), 8, 0.4, linewidth=1.5, fill=False))
+    ax.add_patch(plt.Rectangle((1, 2.0), 8, 0.40, linewidth=1.4, fill=False, edgecolor=ink))
 
-    # Slats (leading edge) — deflection increases slightly with flaps
-    slat_defl = min(max(flaps_value, 0), 5) * 0.06
-    ax.add_patch(plt.Rectangle((1, 2.45), 8, 0.12, linewidth=1, fill=True, alpha=0.15))
-    ax.plot([1, 9], [2.57, 2.57 + slat_defl], linewidth=3)  # tiny “edge” line to imply movement
+    # Slats (leading edge)
+    slat_defl = min(max(int(flaps_value or 0), 0), 5) * 0.06
+    ax.add_patch(plt.Rectangle((1, 2.45), 8, 0.12, linewidth=1, fill=True, color=(1,1,1,0.06), edgecolor=None))
+    ax.plot([1, 9], [2.57, 2.57 + slat_defl], linewidth=3, color=ink, alpha=0.7)
 
     # Flaps (trailing edge)
-    flap_defl = min(max(flaps_value, 0), 25) * 0.02  # scale deflection by numeric “flaps”
-    # Draw 3 segments trailing edge with deflection angle effect
+    flap_defl = min(max(int(flaps_value or 0), 0), 25) * 0.02
     segments = [(1.5, 1.9, 2.8), (4.0, 1.9, 2.8), (6.5, 1.9, 2.8)]
     for (sx, sy, w) in segments:
-        ax.add_patch(plt.Rectangle((sx, sy), w, 0.10, linewidth=1, fill=True, alpha=0.15))
-        ax.plot([sx, sx + w], [sy, sy - flap_defl], linewidth=3)
+        ax.add_patch(plt.Rectangle((sx, sy), w, 0.10, linewidth=1, fill=True, color=(1,1,1,0.06), edgecolor=None))
+        ax.plot([sx, sx + w], [sy, sy - flap_defl], linewidth=3, color=ink, alpha=0.7)
 
     # Label
     family = "Airbus" if "A3" in airframe_hint.upper() else ("Boeing" if "B7" in airframe_hint.upper() else "")
     label = f"Flaps {flaps_value}" + (f" • {family}" if family else "")
-    ax.text(5, 0.35, label, ha="center", va="center", fontsize=11, fontweight="bold")
+    ax.text(5, 0.35, label, ha="center", va="center", fontsize=11, fontweight="bold", color=ink)
 
     return fig
+
 
 def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
     fig, ax = plt.subplots(figsize=(8.8, 4.8))
@@ -367,14 +427,19 @@ if go and txt.strip():
         # OLD: fig_g = draw_n1_gauge(n1, conf)
         # st.pyplot(fig_g, use_container_width=True)
 
-        # NEW: compact dial + flap schematic side-by-side
+        # Style picker (Boeing vs Airbus)
+        style = st.segmented_control("MFD style", options=["Boeing", "Airbus"], default="Boeing")
+
+        st.markdown("<h3 style='margin-top:0.5rem;'>Takeoff Thrust Target</h3>", unsafe_allow_html=True)
         c_g1, c_g2 = st.columns([1, 1], gap="large")
+
         with c_g1:
-            fig_dial = draw_n1_dial(n1, conf)
+            fig_dial = draw_n1_dial(n1, conf, style=style.lower())
             st.pyplot(fig_dial, use_container_width=False)
+
         with c_g2:
             airframe_hint = data.get("header", "")
-            fig_flaps = draw_flap_schematic(int(data.get("flaps") or 0), airframe_hint=airframe_hint)
+            fig_flaps = draw_flap_schematic(int(data.get("flaps") or 0), airframe_hint=airframe_hint, style=style.lower())
             st.pyplot(fig_flaps, use_container_width=False)
 
 
