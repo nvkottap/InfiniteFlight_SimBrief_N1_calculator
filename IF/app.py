@@ -91,12 +91,42 @@ ENGINES = CALIB.get("engines", {})
 AIRFRAMES = CALIB.get("airframes", {})
 
 def get_flap_detents(brand: str, series: str) -> List[str]:
+    """Return canonical, correctly ordered flap detents for the airframe/brand."""
     af = AIRFRAMES.get(series, {})
     det = af.get("detents")
-    if det: return det
+
     if (brand or "").lower() == "airbus":
-        return ["0", "1", "1+F", "2", "3", "FULL"]
-    return ["0","1","2","5","10","15","25","30","40"]
+        # Canonical Airbus set/order
+        canon = ["0","1","1+F","2","3","FULL"]
+        if not det:
+            return canon
+        # Keep only known Airbus labels, in canonical order
+        have = {d.upper(): d for d in det}
+        return [have.get(lbl, lbl) for lbl in canon if lbl in have]
+    else:
+        # Boeing: numeric detents sorted ascending; fall back to a common set
+        if not det:
+            det = ["0","1","2","5","10","15","25","30","40"]
+        # Normalize & sort numerically
+        def to_num(s: str) -> float:
+            s = (s or "").upper().replace("°","").strip()
+            m = re.search(r"-?\d+(\.\d+)?", s)
+            return float(m.group()) if m else 0.0
+        # Deduplicate while preserving original strings
+        uniq = []
+        seen = set()
+        for d in det:
+            u = d.upper()
+            if u not in seen:
+                uniq.append(d)
+                seen.add(u)
+        uniq.sort(key=lambda x: to_num(x))
+        return uniq
+      
+# Not strictly required anymore, but can be handy if you need per-brand ordering elsewhere
+def canonicalize_detents(brand: str, detents: List[str]) -> List[str]:
+    return get_flap_detents(brand, "unused")
+
 
 def choose_selected_label(detents: List[str], numeric_flaps: int, brand: str) -> str:
     if (brand or "").lower() == "airbus":
@@ -371,8 +401,10 @@ def draw_trim_bar(trim_pct: float):
 
 def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str):
     """
-    Compact flap ladder: visually top→bottom = 0 → … → FULL (or 40).
-    Labels on the LEFT; highlight hugs ladder segment only (no overlap with text).
+    Compact flap ladder:
+      • AIRBUS: 0 (top) → 1 → 1+F → 2 → 3 → FULL (bottom)
+      • BOEING: 0 (top) → ... → 40 (bottom)
+    Labels on the LEFT; highlight hugs ladder segment (no text overlap).
     """
     fig, ax = plt.subplots(figsize=(2.2, 3.0))
     bg = "#0a0f14"; white="#ffffff"; yellow="#ffd21f"
@@ -380,9 +412,17 @@ def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str)
     for s in ax.spines.values(): s.set_visible(False)
     ax.get_xaxis().set_visible(False)
 
-    detents_draw = detents[:]  # draw in provided order; visual is top index 0 to bottom index N-1
+    # Ensure correct set & order by brand
+    detents_draw = get_flap_detents(brand, series="unused")
+    # If the caller passed a specific list (from airframe), merge with canonical order:
+    if detents:
+        det_u = {d.upper(): d for d in detents}
+        detents_draw = [det_u.get(lbl, lbl) for lbl in detents_draw if lbl.upper() in det_u]
+
     n = len(detents_draw)
-    ax.set_ylim(-0.5, n-0.5); ax.set_xlim(0,1)
+    ax.set_xlim(0,1)
+    # Invert Y so index 0 renders at TOP (0/top → FULL/bottom)
+    ax.set_ylim(n-0.5, -0.5)
 
     x_ladder = 0.62
     ax.plot([x_ladder, x_ladder], [0, n-1], color=white, linewidth=2.0)
@@ -391,22 +431,28 @@ def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str)
         ax.plot([x_ladder-0.06, x_ladder+0.06], [i, i], color=white, linewidth=1.6)
         ax.text(x_ladder-0.10, i, lab, va="center", ha="right", fontsize=10, color=white)
 
-    if selected_label in detents_draw:
-        idx = detents_draw.index(selected_label)
-        ax.add_patch(plt.Rectangle((x_ladder-0.08, idx-0.35), 0.16, 0.7,
-                                   fill=False, edgecolor=yellow, linewidth=2.0))
+    # Selection highlight: rectangle around the ladder segment only
+    if selected_label:
+        try:
+            # Match case-insensitively
+            idx = next(i for i, l in enumerate(detents_draw) if l.upper() == selected_label.upper())
+            ax.add_patch(plt.Rectangle((x_ladder-0.08, idx-0.35), 0.16, 0.7,
+                                       fill=False, edgecolor=yellow, linewidth=2.0))
+        except StopIteration:
+            pass
 
-    ax.text(0.5, n-0.2, "FLAPS", ha="center", va="bottom",
-            fontsize=10, color=white, fontweight="bold")
-    ax.text(0.5, -0.2, f"{selected_label}", ha="center", va="top",
-            fontsize=10, color=white)
+    ax.text(0.5, -0.15, "FLAPS", ha="center", va="top",
+            fontsize=10, color=white, fontweight="bold", transform=ax.transAxes)
+    ax.text(0.5, 1.08, f"{selected_label or ''}", ha="center", va="bottom",
+            fontsize=10, color=white, transform=ax.transAxes)
+
     ax.set_yticks([])
-        # tighten layout
     try:
         fig.tight_layout(pad=0.2)
     except Exception:
         pass
     return fig
+
 
 
 # ----------------------------- Parser -----------------------------
