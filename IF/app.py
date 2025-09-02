@@ -621,10 +621,19 @@ if go and txt.strip():
                 st.pyplot(draw_n1_dial_boeing(n1, conf), use_container_width=False)
             # Print readout UNDER the dial so it never overlaps
             st.markdown(
-                f"<div style='text-align:center; margin-top:-10px;'>"
-                f"<span style='font-weight:700;'>N1:</span> {n1:.1f}% "
-                f"<span style='opacity:0.7;'>(±{conf:.1f}%)</span>"
-                f"</div>", unsafe_allow_html=True
+                f"""
+                 <div style='text-align:center; margin-top:-6px;'>
+                     <span style='font-size:1.6rem; font-weight:800; color:#00ff90;'>
+                        {n1:.1f}% N1
+                    </span><br>
+                    <span style='font-size:1.0rem; opacity:0.75;'>
+                        ±{conf:.1f}%
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True
+                )
+
             )
 
         with c2:
