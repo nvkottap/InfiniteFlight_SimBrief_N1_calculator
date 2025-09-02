@@ -446,7 +446,8 @@ def estimate_if_trim(data: Dict[str, Any]) -> Dict[str, Any]:
 def draw_n1_dial_boeing(n1: float, conf_pm: float):
     import numpy as np
     min_n1, max_n1 = 0, 110
-    start_deg, end_deg = -210, 30
+    # Flip orientation: 0% on right (−90°), 100% on left (−270°)
+    start_deg, end_deg = -90, -270  
 
     def clamp(v, lo, hi): return max(min(v, hi), lo)
     def n1_to_angle(v):
@@ -485,25 +486,26 @@ def draw_n1_dial_boeing(n1: float, conf_pm: float):
             color=(60/255, 204/255, 140/255, 0.20))
 
     # Ticks & numerals
-    for val in range(0, 111, 5):
-        ang = n1_to_angle(val); major = (val % 10 == 0)
-        r2 = R_inner - (0.06 if major else 0.03)
+    for val in range(0, 111, 10):
+        ang = n1_to_angle(val)
+        r2 = R_inner - 0.06
         ax.plot([R_outer*np.cos(ang), r2*np.cos(ang)],
                 [R_outer*np.sin(ang), r2*np.sin(ang)], color=tick, linewidth=2)
-        if major and 0 < val < 110:
+        if 0 < val < 110:
             rl = r2 - 0.10
             ax.text(rl*np.cos(ang), rl*np.sin(ang), f"{val}",
                     ha="center", va="center", fontsize=9, color=label)
 
-    # --- Centered three-line white text ---
-    ax.text(0, 0.08, "N1%", ha="center", va="center",
+    # --- Centered three-line white text with better spacing ---
+    ax.text(0, 0.15, "N1%", ha="center", va="center",
             fontsize=11, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.02, f"{n1:.1f}%", ha="center", va="center",
-            fontsize=13, fontweight="bold", color=txt_color, zorder=6)
-    ax.text(0, -0.12, f"±{conf_pm:.1f}%", ha="center", va="center",
-            fontsize=10, color=txt_color, alpha=0.9, zorder=6)
+    ax.text(0, 0.00, f"{n1:.1f}%", ha="center", va="center",
+            fontsize=14, fontweight="bold", color=txt_color, zorder=6)
+    ax.text(0, -0.15, f"±{conf_pm:.1f}%", ha="center", va="center",
+            fontsize=11, color=txt_color, alpha=0.9, zorder=6)
 
     return fig
+
 
 def draw_n1_dial_airbus(n1: float, conf_pm: float):
     import numpy as np
