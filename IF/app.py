@@ -1,16 +1,19 @@
 # app.py
 # Infinite Flight - N1% Estimator (Sim-use only)
-# Paste TAKEOFF PERFORMANCE text → estimate N1% + show a Takeoff Performance Card.
-# Edits: removed live engine tweaks, button now "Estimate N1%", added performance card.
+# UX tweaks: better engine detection label, larger top section, smaller sensitivity plots, seaborn styling.
 
 import re
 import json
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, Optional
 
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns  # ← NEW
+
+# ----- Seaborn global style (cleaner visuals) -----
+sns.set_theme(style="whitegrid", context="talk")  # slightly larger fonts overall
 
 # --------------------------
 # Config / Data Loading
@@ -22,7 +25,6 @@ def load_calibrations() -> Dict[str, Any]:
     if CAL_PATH.exists():
         with open(CAL_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
-    # Minimal fallback if file missing (should not happen in normal use)
     return {
         "leap-1b28": {"a": 93.5, "b_temp": -0.10, "c_pa": 0.25, "d_derate": -2.0, "w_ref": 160.0, "e_wt": 0.01},
         "generic":   {"a": 92.0, "b_temp": -0.10, "c_pa": 0.20, "d_derate": -2.0, "w_ref": 300.0, "e_wt": 0.00}
@@ -40,29 +42,39 @@ ENGINE_ALIASES = {
     "PW2037": "pw2037"
 }
 
-def detect_engine_id(raw_engine_line: str) -> Tuple[str, str]:
-    pretty = raw_engine_line.strip()
-    for key, eng_id in ENGINE_ALIASES.items():
-        if key.lower() in pretty.lower():
-            return eng_id, pretty
-    return "generic", pretty
+# Short, human-friendly labels
+ENGINE_PRETTY = {
+    "leap-1b28": "LEAP-1B",
+    "ge90-94b": "GE90-94B",
+    "trent-970-84": "Trent 970-84",
+    "trent-xwb-84": "Trent XWB-84",
+    "cfm56-5b3": "CFM56-5B3/P",
+    "cfm56-5b4": "CFM56-5B4/P",
+    "pw2037": "PW2037",
+    "generic": "Generic"
+}
+
+def detect_engine_in_text(txt: str) -> Tuple[str, Optional[str]]:
+    """
+    Scan the entire pasted text for any known engine token.
+    Return (engine_id, matched_token or None).
+    """
+    for token, eng_id in ENGINE_ALIASES.items():
+        if re.search(rf"\b{re.escape(token)}\b", txt, flags=re.I):
+            return eng_id, token
+    return "generic", None
 
 def pressure_altitude_ft(field_elev_ft: float, qnh_inhg: float) -> float:
-    # Approximation: PA = Elev + (29.92 - QNH)*1000
     return float(field_elev_ft) + (29.92 - float(qnh_inhg)) * 1000.0
 
 def parse_takeoff_text(txt: str) -> Dict[str, Any]:
-    """
-    Parse the pasted TAKEOFF PERFORMANCE block.
-    """
     d = {}
 
-    # Header: e.g., "N808SB B737 MAX 8 LEAP-1B28"
+    # Keep original header (for the card title), but DO NOT use it to decide engine label
     header_line = next((l for l in txt.splitlines() if re.search(r"\b[A-Z0-9]{3,}.*", l)), "")
     d["header"] = header_line
-    d["engine_id"], d["engine_name"] = detect_engine_id(header_line)
 
-    # Airport / runway (optional; used only for the card)
+    # Airport / runway (optional; used on the card)
     apt = re.search(r"APT\s+([A-Z]{4})/([A-Z]{3})", txt)
     d["apt_icao"] = apt.group(1) if apt else None
     rwy = re.search(r"RWY\s+(\d+[LRC]?)/\+?0?", txt)
@@ -87,11 +99,16 @@ def parse_takeoff_text(txt: str) -> Dict[str, Any]:
     vr = re.search(r"VR\s+(\d+)", txt); d["vr"] = int(vr.group(1)) if vr else None
     v2 = re.search(r"V2\s+(\d+)", txt); d["v2"] = int(v2.group(1)) if v2 else None
 
+    # Engine detection (robust): scan whole text for known tokens
+    eng_id, token = detect_engine_in_text(txt)
+    d["engine_id"] = eng_id
+    d["engine_token"] = token
+    d["engine_pretty"] = ENGINE_PRETTY.get(eng_id, "Generic")
+
     return d
 
 def derate_level_from_mode(mode: str) -> int:
-    if not mode:
-        return 0
+    if not mode: return 0
     m = mode.upper()
     if m == "D-TO2": return 2
     if m == "D-TO1": return 1
@@ -101,10 +118,6 @@ def derate_level_from_mode(mode: str) -> int:
 def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float,
                 elev_ft: float, tow_klb: float, bleeds_on: bool, anti_ice_on: bool,
                 thrust_mode: str) -> Dict[str, Any]:
-    """
-    Heuristic model (sim-use only):
-      N1 = a + b*(SEL - OAT) + c*(PA_kft) + d*(derate_steps) + e*(TOW - w_ref) + bleed/anti-ice taps
-    """
     cal = CAL.get(engine_id, CAL.get("generic"))
     a = cal["a"]; b = cal["b_temp"]; c = cal["c_pa"]; d = cal["d_derate"]; w_ref = cal["w_ref"]; e = cal["e_wt"]
 
@@ -116,35 +129,31 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     wt_term = ((tow_klb or w_ref) - w_ref)
 
     n1 = a + b*deltaT + c*pa_kft + d*derate_steps + e*wt_term
-    if bleeds_on:
-        n1 += 0.2
-    if anti_ice_on:
-        n1 += 0.5
+    if bleeds_on:   n1 += 0.2
+    if anti_ice_on: n1 += 0.5
 
     conf_pm = 0.4 + 0.05*pa_kft + 0.1*derate_steps
     return {"n1": n1, "conf_pm": conf_pm, "pa_ft": pa_ft}
 
 def draw_n1_gauge(n1: float, conf_pm: float):
-    fig, ax = plt.subplots(figsize=(7, 1.2))
+    # Larger title for emphasis (bigger top section)
+    fig, ax = plt.subplots(figsize=(8.5, 1.5))  # slightly wider & taller than before
     ax.set_xlim(80, 102)
     ax.set_ylim(0, 1)
     ax.axvspan(max(80, n1-conf_pm), min(102, n1+conf_pm), alpha=0.15)
     ax.axvline(n1, linewidth=3)
     ax.set_yticks([])
     ax.set_xlabel("N1 (%)")
-    ax.set_title(f"N1 target ≈ {n1:.1f}%  (±{conf_pm:.1f}%)")
+    ax.set_title(f"N1 target ≈ {n1:.1f}%  (±{conf_pm:.1f}%)", fontsize=18)  # bigger title
     return fig
 
 def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
-    """
-    Renders a simple Takeoff Performance Card as a matplotlib figure.
-    """
-    fig, ax = plt.subplots(figsize=(8, 4.6))
+    fig, ax = plt.subplots(figsize=(8.8, 4.8))
     ax.axis("off")
 
     # Header
     title = (meta.get("header") or "TAKEOFF PERFORMANCE").strip()
-    ax.text(0.02, 0.92, title, fontsize=12, fontweight="bold")
+    ax.text(0.02, 0.92, title, fontsize=13, fontweight="bold")
 
     # Left column (aircraft/config)
     left_y = 0.82
@@ -154,8 +163,9 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
         left_y -= 0.06
 
     L("Airport", f'{meta.get("apt_icao") or "-"} / RWY {meta.get("runway") or "-"} / {meta.get("rwy_cond","-")}')
-    L("Flaps", meta.get("flaps") or "-")
-    L("Thrust", meta.get("thrust_mode") or "-")
+    L("Engine",  meta.get("engine_pretty", "Generic"))
+    L("Flaps",   meta.get("flaps") or "-")
+    L("Thrust",  meta.get("thrust_mode") or "-")
     L("SEL TEMP (°C)", meta.get("sel_temp_c") or "-")
     L("Bleeds / A-I", f'{"ON" if meta.get("bleeds_on") else "OFF"} / {"ON" if meta.get("anti_ice_on") else "OFF"}')
     L("TOW (k lb)", meta.get("tow_klb") or "-")
@@ -187,7 +197,6 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
     ax_in.set_yticks([])
     ax_in.set_xlabel("N1 (%)", fontsize=8)
 
-    # Footer
     ax.text(0.02, 0.05, "Simulation aid only • Heuristic estimate", fontsize=8)
     return fig
 
@@ -197,7 +206,8 @@ def draw_perf_card(meta: Dict[str, Any], result: Dict[str, Any]):
 
 st.set_page_config(page_title="IF Takeoff N1 Estimator", page_icon="🛫", layout="wide")
 
-st.title("🛫 Infinite Flight – Takeoff N1% Estimator")
+# Slightly larger main title (bigger top section)
+st.markdown("<h1 style='font-size:2.1rem; margin-bottom:0;'>🛫 Infinite Flight – Takeoff N1% Estimator</h1>", unsafe_allow_html=True)
 st.caption("Paste your TAKEOFF PERFORMANCE text → get an estimated N1% and a Takeoff Performance Card. **Sim-use only; not for real-world operations.**")
 
 txt = st.text_area(
@@ -206,24 +216,22 @@ txt = st.text_area(
     placeholder="Paste the whole block here…"
 )
 
-go = st.button("Estimate N1%")  # (2) Button label updated
+go = st.button("Estimate N1%")
 
 st.markdown("---")
 
 if go and txt.strip():
     data = parse_takeoff_text(txt)
 
-    # Engine autodetect (fallback to generic if missing)
-    detected_engine = data["engine_id"]
-    pretty_engine = data["engine_name"] or "Engine not found in header"
-    st.write(f"**Detected engine (from header):** {pretty_engine}")
+    # Clean engine label (no “from header”, never show TAKEOFF PERFORMANCE)
+    st.write(f"**Detected engine:** {data['engine_pretty']}")
 
     # Compute
     if None in (data["oat_c"], data["sel_temp_c"], data["qnh_inhg"], data["elev_ft"], data["tow_klb"]):
         st.warning("Some inputs are missing. Make sure your paste includes OAT, QNH, Elevation, Weight, and SEL TEMP.")
     else:
         res = estimate_n1(
-            engine_id=detected_engine,
+            engine_id=data["engine_id"],
             oat_c=data["oat_c"],
             sel_temp_c=data["sel_temp_c"],
             qnh_inhg=data["qnh_inhg"],
@@ -235,49 +243,55 @@ if go and txt.strip():
         )
         n1 = res["n1"]; conf = res["conf_pm"]
 
-        # Top metrics
-        m1, m2, m3 = st.columns(3)
+        # Top metrics — Streamlit metrics are fixed size, so we emphasize via bigger page title (above),
+        # and a larger gauge title below. Also group metrics in wider columns to feel "larger".
+        m1, m2, m3 = st.columns([1.2, 1, 1])
         with m1: st.metric("Estimated N1%", f"{n1:.1f}%", f"±{conf:.1f}%")
         with m2: st.metric("Pressure Altitude", f'{res["pa_ft"]:,.0f} ft')
         with m3:
             if data["v1"] and data["vr"] and data["v2"]:
                 st.metric("V1 / VR / V2", f'{data["v1"]} / {data["vr"]} / {data["v2"]}')
 
-        # Gauge
-        st.subheader("Takeoff Thrust Target")
+        # Bigger “Takeoff Thrust Target” section (gauge has larger title + figure size)
+        st.markdown("<h3 style='margin-top:0.5rem;'>Takeoff Thrust Target</h3>", unsafe_allow_html=True)
         fig_g = draw_n1_gauge(n1, conf)
         st.pyplot(fig_g, use_container_width=True)
 
-        # (3) Takeoff Performance Card
+        # Performance Card
         st.subheader("Takeoff Performance Card")
         fig_card = draw_perf_card(data, res)
         st.pyplot(fig_card, use_container_width=True)
 
-        # Sensitivities (kept—useful for tuning FLEX choices)
-        st.subheader("Sensitivity: N1 vs Selected Temperature")
-        sel_range = np.arange(max(0, data["sel_temp_c"]-12), data["sel_temp_c"]+13, 1)
-        n1_curve = []
-        for s in sel_range:
-            tmp = estimate_n1(detected_engine, data["oat_c"], float(s), data["qnh_inhg"], data["elev_ft"],
-                              data["tow_klb"], data["bleeds_on"], data["anti_ice_on"], data["thrust_mode"])
-            n1_curve.append(tmp["n1"])
-        fig2, ax2 = plt.subplots(figsize=(7,3))
-        ax2.plot(sel_range, n1_curve, linewidth=2)
-        ax2.axvline(data["sel_temp_c"], linestyle="--")
-        ax2.set_xlabel("Selected Temperature (°C)")
-        ax2.set_ylabel("Estimated N1 (%)")
-        st.pyplot(fig2, use_container_width=True)
+        # Smaller sensitivity plots: put them side-by-side with smaller fig sizes
+        st.subheader("Sensitivity")
+        c1, c2 = st.columns(2, gap="large")
 
-        st.subheader("Sensitivity: N1 vs Field Elevation (Pressure Altitude Effect)")
-        elev_demo = np.arange(0, 9001, 500)
-        pa_curve = []
-        for e_ft in elev_demo:
-            tmp = estimate_n1(detected_engine, data["oat_c"], data["sel_temp_c"], data["qnh_inhg"], float(e_ft),
-                              data["tow_klb"], data["bleeds_on"], data["anti_ice_on"], data["thrust_mode"])
-            pa_curve.append(tmp["n1"])
-        fig3, ax3 = plt.subplots(figsize=(7,3))
-        ax3.plot(elev_demo, pa_curve, linewidth=2)
-        ax3.axvline(float(data["elev_ft"]), linestyle="--")
-        ax3.set_xlabel("Field Elevation (ft) at same QNH")
-        ax3.set_ylabel("Estimated N1 (%)")
-        st.pyplot(fig3, use_container_width=True)
+        with c1:
+            st.caption("N1 vs Selected Temperature")
+            sel_range = np.arange(max(0, data["sel_temp_c"]-12), data["sel_temp_c"]+13, 1)
+            n1_curve = []
+            for s in sel_range:
+                tmp = estimate_n1(data["engine_id"], data["oat_c"], float(s), data["qnh_inhg"], data["elev_ft"],
+                                  data["tow_klb"], data["bleeds_on"], data["anti_ice_on"], data["thrust_mode"])
+                n1_curve.append(tmp["n1"])
+            fig2, ax2 = plt.subplots(figsize=(4.6, 2.6))  # ← smaller
+            ax2.plot(sel_range, n1_curve, linewidth=2)
+            ax2.axvline(data["sel_temp_c"], linestyle="--")
+            ax2.set_xlabel("Selected Temperature (°C)")
+            ax2.set_ylabel("Estimated N1 (%)")
+            st.pyplot(fig2, use_container_width=True)
+
+        with c2:
+            st.caption("N1 vs Field Elevation (Pressure Altitude Effect)")
+            elev_demo = np.arange(0, 9001, 500)
+            pa_curve = []
+            for e_ft in elev_demo:
+                tmp = estimate_n1(data["engine_id"], data["oat_c"], data["sel_temp_c"], data["qnh_inhg"], float(e_ft),
+                                  data["tow_klb"], data["bleeds_on"], data["anti_ice_on"], data["thrust_mode"])
+                pa_curve.append(tmp["n1"])
+            fig3, ax3 = plt.subplots(figsize=(4.6, 2.6))  # ← smaller
+            ax3.plot(elev_demo, pa_curve, linewidth=2)
+            ax3.axvline(float(data["elev_ft"]), linestyle="--")
+            ax3.set_xlabel("Field Elevation (ft) at same QNH")
+            ax3.set_ylabel("Estimated N1 (%)")
+            st.pyplot(fig3, use_container_width=True)
