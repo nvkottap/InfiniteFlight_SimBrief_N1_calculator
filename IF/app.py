@@ -8,7 +8,37 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-st.set_page_config(page_title="IF N1% & Trim Estimator", page_icon="🛫", layout="wide")
+st.set_page_config(page_title="SimBrief to IF TO Tool", page_icon="🛫", layout="wide")
+
+# --- UI polish CSS (readability + spacing) ---
+st.markdown("""
+<style>
+/* Info bar */
+.info-bar {
+  display:flex; flex-wrap:wrap; gap:16px; align-items:center;
+  padding:14px 16px; margin: 4px 0 10px 0;
+  border:1px solid #2a3542; border-radius:12px; 
+  background:#111824;
+}
+.info-kv { display:flex; gap:6px; align-items:baseline; }
+.info-kv .k { color:#a9c4db; font-size:15px; letter-spacing:0.2px; }
+.info-kv .v { color:#ffffff; font-weight:800; font-size:18px; }
+
+/* Reduce default Streamlit figure top/bottom spacing */
+.block-container { padding-top: 1.0rem; padding-bottom: 2.0rem; }
+.element-container:has(.stPlotlyChart), 
+.element-container:has(canvas),
+.element-container:has(img),
+.element-container:has(svg) { margin-bottom: 0.25rem !important; }
+
+/* Columns spacing harmonize */
+div[data-testid="stHorizontalBlock"] { gap: 16px; }
+
+/* Make Matplotlib figures appear tighter */
+.figure-tight img { margin: 0 !important; display:block; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ----------------------------- Utilities -----------------------------
 def pressure_altitude_ft(field_elev_ft: float, qnh_inhg: float) -> float:
@@ -253,6 +283,12 @@ def draw_n1_dial_boeing(n1_percent: float, max_n1_pct: float = 102.0):
     cx,cy = (anchor_x, anchor_y + box_h/2)
     ax.text(cx, cy + 0.01, f"{n1_sc:.1f}", ha="center", va="center",
             fontsize=font_big, fontweight="bold", color=white, zorder=11)
+
+        # tighten layout
+    try:
+        fig.tight_layout(pad=0.2)
+    except Exception:
+        pass
     return fig
 
 def draw_n1_dial_airbus(n1_percent: float, max_n1_pct: float = 100.0):
@@ -301,7 +337,13 @@ def draw_n1_dial_airbus(n1_percent: float, max_n1_pct: float = 100.0):
     ax.text(0, -0.01, f"{n1_percent:.1f}", ha="center", va="center",
             fontsize=17, fontweight="bold", color=green, zorder=7)
     ax.text(0, -0.12, "%", ha="center", va="center", fontsize=11, color=green, zorder=7)
+        # tighten layout
+    try:
+        fig.tight_layout(pad=0.2)
+    except Exception:
+        pass
     return fig
+
 
 def draw_trim_bar(trim_pct: float):
     """Compact vertical trim bar −100..+100% with neutral marker."""
@@ -319,7 +361,13 @@ def draw_trim_bar(trim_pct: float):
     ax.text(0.5,105,"TRIM", ha="center", va="bottom", fontsize=10, color="#ffffff", fontweight="bold")
     ax.text(0.5,-115,f"{trim_pct:.0f}%", ha="center", va="top", fontsize=10, color="#ffffff")
     ax.set_yticks([])
+        # tighten layout
+    try:
+        fig.tight_layout(pad=0.2)
+    except Exception:
+        pass
     return fig
+
 
 def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str):
     """
@@ -353,7 +401,13 @@ def draw_flap_detents_small(brand: str, detents: List[str], selected_label: str)
     ax.text(0.5, -0.2, f"{selected_label}", ha="center", va="top",
             fontsize=10, color=white)
     ax.set_yticks([])
+        # tighten layout
+    try:
+        fig.tight_layout(pad=0.2)
+    except Exception:
+        pass
     return fig
+
 
 # ----------------------------- Parser -----------------------------
 PASTE_KEYS = {
@@ -457,52 +511,62 @@ if go:
     trim_pct = estimate_trim_if(series=series, brand=brand,
                                 flaps_label=selected_flaps_label, tow_klb=tow_klb)
 
-    # -------- Metrics strip (top) --------
+   # -------- Metrics strip (top) – brighter, larger, clearer --------
     v1 = data.get("V1"); vr = data.get("VR"); v2 = data.get("V2")
     vref = data.get("VREF"); gdot = data.get("GREENDOT")
 
-    metrics_html = f"""
-    <div style="display:flex; gap:14px; flex-wrap:wrap; align-items:center;
-                padding:12px; border:1px solid #222; border-radius:10px; background:#0b0f15;">
-      <div><span style="opacity:0.7">N1</span> <span style="font-weight:800">{n1:.1f}%</span></div>
-      <div><span style="opacity:0.7">Flaps</span> <span style="font-weight:800">{selected_flaps_label}</span></div>
-      <div><span style="opacity:0.7">Trim</span> <span style="font-weight:800">{trim_pct:.0f}%</span></div>
-      <div><span style="opacity:0.7">PA</span> <span style="font-weight:800">{pa_ft:.0f} ft</span></div>
-    """
-    if v1: metrics_html += f'<div><span style="opacity:0.7">V1</span> <span style="font-weight:800">{int(v1)}</span></div>'
-    if vr: metrics_html += f'<div><span style="opacity:0.7">VR</span> <span style="font-weight:800">{int(vr)}</span></div>'
-    if v2: metrics_html += f'<div><span style="opacity:0.7">V2</span> <span style="font-weight:800">{int(v2)}</span></div>'
-    if vref: metrics_html += f'<div><span style="opacity:0.7">VREF</span> <span style="font-weight:800">{int(vref)}</span></div>'
-    if gdot: metrics_html += f'<div><span style="opacity:0.7">Green Dot</span> <span style="font-weight:800">{int(gdot)}</span></div>'
+    metrics_html = f'''
+    <div class="info-bar">
+    <div class="info-kv"><span class="k">N1</span><span class="v">{n1:.1f}%</span></div>
+    <div class="info-kv"><span class="k">Flaps</span><span class="v">{selected_flaps_label}</span></div>
+    <div class="info-kv"><span class="k">Trim</span><span class="v">{trim_pct:.0f}%</span></div>
+    <div class="info-kv"><span class="k">PA</span><span class="v">{pa_ft:.0f} ft</span></div>
+    '''
+    if v1:  metrics_html += f'<div class="info-kv"><span class="k">V1</span><span class="v">{int(v1)}</span></div>'
+    if vr:  metrics_html += f'<div class="info-kv"><span class="k">VR</span><span class="v">{int(vr)}</span></div>'
+    if v2:  metrics_html += f'<div class="info-kv"><span class="k">V2</span><span class="v">{int(v2)}</span></div>'
+    if vref: metrics_html += f'<div class="info-kv"><span class="k">VREF</span><span class="v">{int(vref)}</span></div>'
+    if gdot: metrics_html += f'<div class="info-kv"><span class="k">Green Dot</span><span class="v">{int(gdot)}</span></div>'
     metrics_html += "</div>"
+
     st.markdown(metrics_html, unsafe_allow_html=True)
 
-    # -------- Diagram row --------
-    col_dial, col_right = st.columns([3, 2], gap="large")
 
-    with col_dial:
-        n1_cap = af.get("n1_max_pct", 102.0)
-        if (brand or "").lower() == "boeing":
-            fig = draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=n1_cap)
-        else:
-            fig = draw_n1_dial_airbus(n1_percent=n1, max_n1_pct=n1_cap)
+    # -------- Diagram row --------
+    # -------- Diagram row (consistent spacing) --------
+col_dial, col_right = st.columns([3, 2], gap="small")
+
+with col_dial:
+    n1_cap = af.get("n1_max_pct", 102.0)
+    if (brand or "").lower() == "boeing":
+        fig = draw_n1_dial_boeing(n1_percent=n1, max_n1_pct=n1_cap)
+    else:
+        fig = draw_n1_dial_airbus(n1_percent=n1, max_n1_pct=n1_cap)
+    # Wrap to help CSS trim extra spacing
+    with st.container():
         st.pyplot(fig, use_container_width=False)
 
-    with col_right:
-        s1, s2 = st.columns(2)
-        with s1:
-            detents = get_flap_detents(brand, series)
-            st.pyplot(draw_flap_detents_small(brand, detents, selected_flaps_label), use_container_width=False)
-        with s2:
-            st.pyplot(draw_trim_bar(trim_pct), use_container_width=False)
+with col_right:
+    s1, s2 = st.columns(2, gap="small")
+    with s1:
+        detents = get_flap_detents(brand, series)
+        fig_f = draw_flap_detents_small(brand, detents, selected_flaps_label)
+        with st.container():
+            st.pyplot(fig_f, use_container_width=False)
+    with s2:
+        fig_t = draw_trim_bar(trim_pct)
+        with st.container():
+            st.pyplot(fig_t, use_container_width=False)
+
 
     # -------- Performance card (bottom) --------
     perf = f"""
-    <div style="margin-top:10px; padding:14px; border:1px solid #222; border-radius:10px; background:#0b0f15;">
-      <div style="font-size:1.05rem; font-weight:700; margin-bottom:6px;">Performance Summary</div>
-      <div>Series: <b>{series.replace('_',' ').title()}</b> | Brand: <b>{brand.title()}</b> | Thrust: <b>{thrust_mode}</b></div>
-      <div>SEL Temp: <b>{sel:.0f}°C</b> | OAT: <b>{oat:.0f}°C</b> | QNH: <b>{qnh:.2f} inHg</b> | Field Elev: <b>{elev:.0f} ft</b> | PA: <b>{pa_ft:.0f} ft</b></div>
+    <div style="margin-top:10px; padding:14px; border:1px solid #2a3542; border-radius:12px; background:#111824; color:#e9f0f6;">
+      <div style="font-size:1.08rem; font-weight:700; margin-bottom:6px;">Performance Summary</div>
+      <div>Series: <b style="color:#fff;">{series.replace('_',' ').title()}</b> &nbsp;|&nbsp; Brand: <b style="color:#fff;">{brand.title()}</b> &nbsp;|&nbsp; Thrust: <b style="color:#fff;">{thrust_mode}</b></div>
+      <div>SEL Temp: <b style="color:#fff;">{sel:.0f}°C</b> &nbsp;|&nbsp; OAT: <b style="color:#fff;">{oat:.0f}°C</b> &nbsp;|&nbsp; QNH: <b style="color:#fff;">{qnh:.2f} inHg</b> &nbsp;|&nbsp; Field Elev: <b style="color:#fff;">{elev:.0f} ft</b> &nbsp;|&nbsp; PA: <b style="color:#fff;">{pa_ft:.0f} ft</b></div>
     """
+
     if any([v1, vr, v2, vref, gdot]):
         perf += "<div>"
         if v1:  perf += f"V1: <b>{int(v1)}</b> &nbsp; "
