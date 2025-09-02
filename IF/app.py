@@ -344,49 +344,52 @@ def estimate_n1(engine_id: str, oat_c: float, sel_temp_c: float, qnh_inhg: float
     """
     Heuristic model (sim-use only):
       N1_raw = a + b*(SEL-OAT) + c*(PA_kft) + d*(derate_steps) + e*(TOW - w_ref) + flap_drag
-      N1 = max(N1_raw, floor(weight, PA, flaps)), then blend optional airframe overrides
+      Then apply: derate effectiveness vs weight, floor, and airframe overrides.
     """
     cal = ENGINES.get(engine_id, ENGINES.get("generic", {}))
     a = cal.get("a", 95.0); b = cal.get("b_temp", -0.06); c = cal.get("c_pa", 0.24)
     d = cal.get("d_derate", -1.5); w_ref = cal.get("w_ref", 300.0); e = cal.get("e_wt", 0.018)
 
+    # Inputs & environment
     deltaT = (sel_temp_c - oat_c) if (sel_temp_c is not None and oat_c is not None) else 0.0
     pa_ft = pressure_altitude_ft(elev_ft or 0.0, qnh_inhg or 29.92)
     pa_kft = max(pa_ft, 0.0) / 1000.0
     derate_steps = derate_level_from_mode(thrust_mode or "")
-    # Derate effectiveness: lighter planes benefit more, heavy planes less
-    af = AIRFRAMES.get(series, {})
-    mtow = float(af.get("mtow_klb", 0) or 0)
-    wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow)) if mtow > 0 else 0.6
-    # Adjust the base derate effect by shifting N1 back up when very heavy
-    n1 += 0.8 * derate_steps * (wf - 0.6)  # >0 if wf>0.6, reduces "benefit" at high weight
-
     wt_term = ((tow_klb or w_ref) - w_ref)
 
-    # Base model
-    n1 = a + b*deltaT + c*pa_kft + d*derate_steps + e*wt_term
-    if bleeds_on:   n1 += 0.2
-    if anti_ice_on: n1 += 0.5
-
-    # Flap drag term (more flaps -> more thrust)
+    # Flaps (select label/value)
     detents = get_flap_detents(brand, series)
     sel_label = choose_selected_label(detents, int(flaps or 0), brand)
     sel_val = detent_numeric_value(sel_label or ("1" if brand=="airbus" else "5"), brand)
-    base_val = 1.0 if brand=="airbus" else 5.0
+    base_val = 1.0 if brand == "airbus" else 5.0
+
+    # Base model (define n1 BEFORE any further adjustments)
+    n1 = a + b*deltaT + c*pa_kft + d*derate_steps + e*wt_term
+    if bleeds_on:   n1 += 0.2
+    if anti_ice_on: n1 += 0.5
+    # Flap drag term (more flaps → more thrust)
     n1 += 0.35 * max(0.0, sel_val - base_val)
 
-    # Guardrail floor (heavier, higher PA, more flaps => higher floor)
+    # NEW: derate effectiveness depends on weight (apply AFTER n1 exists)
+    af = AIRFRAMES.get(series, {})
+    mtow = float(af.get("mtow_klb", 0) or 0)
+    wf = max(0.0, min(1.0, (tow_klb or 0.0) / mtow)) if mtow > 0 else 0.6
+    # Heavier (wf>0.6) regains some N1 despite derate; lighter benefits more from derate
+    n1 += 0.8 * derate_steps * (wf - 0.6)
+
+    # Guardrail floor & cap
     weight_ratio = max(0.8, (tow_klb or w_ref) / w_ref)
     n1_floor = 88.0 + 5.5*weight_ratio + 0.35*pa_kft + 0.25*max(0.0, sel_val - base_val)
     n1 = max(n1, n1_floor)
-    n1 = min(n1, 103.0)  # cap
+    n1 = min(n1, 103.0)
 
-    # Optional override blend from airframe JSON (keeps continuity but nudges toward guide)
+    # Blend toward any airframe overrides
     n1 = apply_n1_overrides(series, sel_label or "", tow_klb, n1)
 
     # Confidence band (heuristic)
     conf_pm = 0.6 + 0.06*pa_kft + 0.15*derate_steps
     return {"n1": n1, "conf_pm": conf_pm, "pa_ft": pa_ft}
+
 
 # --------------------------
 # IF Trim estimator (stronger + optional overrides)
