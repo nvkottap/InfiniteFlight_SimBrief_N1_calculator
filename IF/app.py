@@ -26,27 +26,55 @@ sns.set_theme(style="whitegrid", context="talk")
 # --------------------------
 # Unified calibration loader
 # --------------------------
+# ---- Robust unified calibration loader ----
 CALIB_PATH = Path(__file__).with_name("calibrations.json")
 
-def load_calibrations_unified() -> Dict[str, Any]:
-    if CALIB_PATH.exists():
-        with open(CALIB_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    # Minimal fallback if file missing
-    return {
-        "engines": {
-            "generic": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
-        },
-        "airframes": {
-            "generic": { "engine_id": "generic", "brand": "boeing",
-                         "detents": ["0","5","15","25","30"],
-                         "baseline_trim": 8.0, "baseline_flaps": 5, "cg_ref": 25.0 }
-        }
+_MINIMAL_FALLBACK = {
+    "engines": {
+        "generic": { "a": 95.0, "b_temp": -0.06, "c_pa": 0.24, "d_derate": -1.5, "w_ref": 300.0, "e_wt": 0.018 }
+    },
+    "airframes": {
+        "generic": { "engine_id": "generic", "brand": "boeing",
+                     "detents": ["0","5","15","25","30"],
+                     "baseline_trim": 8.0, "baseline_flaps": 5, "cg_ref": 25.0 }
     }
+}
+
+def load_calibrations_unified() -> Dict[str, Any]:
+    try:
+        with open(CALIB_PATH, "r", encoding="utf-8") as f:
+            raw = f.read()
+        # Quick sanity check to catch HTML or blank files
+        if not raw.strip().startswith("{"):
+            raise ValueError("File does not start with '{' – likely not JSON (maybe a bad paste or HTML).")
+        data = json.loads(raw)
+        return data
+    except FileNotFoundError:
+        st.warning(f"`{CALIB_PATH.name}` not found. Using minimal built-in calibration.")
+        return _MINIMAL_FALLBACK
+    except json.JSONDecodeError as e:
+        # Point you to the exact spot
+        st.error(
+            f"Your `{CALIB_PATH.name}` contains invalid JSON at line {e.lineno}, column {e.colno}: {e.msg}."
+        )
+        # Show a small preview around the error location
+        try:
+            with open(CALIB_PATH, "r", encoding="utf-8") as f:
+                bad_lines = f.readlines()
+            start = max(0, e.lineno - 3); end = min(len(bad_lines), e.lineno + 2)
+            preview = "".join(f"{i+1:>4}: {bad_lines[i]}" for i in range(start, end))
+            st.code(preview, language="json")
+        except Exception:
+            pass
+        st.info("Falling back to a minimal internal calibration so the app can still run.")
+        return _MINIMAL_FALLBACK
+    except Exception as e:
+        st.error(f"Could not read `{CALIB_PATH.name}`: {e}")
+        return _MINIMAL_FALLBACK
 
 CALIB = load_calibrations_unified()
-ENGINES: Dict[str, Any] = CALIB.get("engines", {})
-AIRFRAMES: Dict[str, Any] = CALIB.get("airframes", {})
+ENGINES = CALIB.get("engines", {})
+AIRFRAMES = CALIB.get("airframes", {})
 
 # Pretty names for engines (optional)
 ENGINE_PRETTY = {
